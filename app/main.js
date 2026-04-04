@@ -238,15 +238,25 @@ function initInspector(wri, normBands, classified) {
   panel.add(fPanel);
   Map.add(panel);
 
-  var allBands = wri.addBands(normBands).addBands(classified.rename('risk_class'));
+  var allBands = wri.addBands(normBands).addBands(classified.rename('risk_class'))
+                    .unmask(-1);   // unmask so reduceRegion always returns a value
 
   Map.onClick(function(c) {
     var pt = ee.Geometry.Point([c.lon, c.lat]);
     coordLbl.setValue('Lat: '+c.lat.toFixed(4)+'  Lon: '+c.lon.toFixed(4));
     wriLbl.setValue('Sampling…'); fPanel.clear();
-    allBands.sample({region:pt, scale:500, numPixels:1}).first()
-      .toDictionary().evaluate(function(v) {
-        if (!v) { wriLbl.setValue('No data here.'); return; }
+
+    // reduceRegion with ee.Reducer.first() is ~3-5× faster than .sample()
+    allBands.reduceRegion({
+      reducer:    ee.Reducer.first(),
+      geometry:   pt,
+      scale:      1000,          // 1 km — fast; change to 500 for finer detail
+      bestEffort: true
+    }).evaluate(function(v) {
+        if (!v || v['WRI'] === null || v['WRI'] < 0) {
+          wriLbl.setValue('No data at this location.');
+          return;
+        }
         var cls = v['risk_class']||1;
         var col = cls===3?'#d7191c':cls===2?'#f4a02b':'#1a9641';
         var txt = cls===3?'🔴 High Risk':cls===2?'🟠 Medium Risk':'🟢 Low Risk';
