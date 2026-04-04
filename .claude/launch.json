@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "EMBER Landing Page (npx serve)",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "app", "--listen", "3000", "--no-clipboard"],
+      "port": 3000
+    }
+  ]
+}
