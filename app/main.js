@@ -317,6 +317,56 @@ function buildControlPanel(onRun) {
   panel.add(ui.Label('──────────────────────────', S.div));
   panel.add(ui.Label('Factor Weights (0 – 1)', S.section));
 
+  // ── Preset weight configurations ──────────────────────────────────
+  // w1=VDI  w2=LST  w3=PA  w4=WS  w5=SLOPE  w6=HFD
+  var PRESETS = {
+    'Equal weights (default)':
+      {w1:0.17, w2:0.17, w3:0.17, w4:0.17, w5:0.17, w6:0.17,
+       desc:'Balanced — no prior knowledge of the region'},
+    'Drought & heat stress':
+      {w1:0.30, w2:0.25, w3:0.25, w4:0.10, w5:0.05, w6:0.05,
+       desc:'Arid/semi-arid regions during dry season'},
+    'Wind-driven fire':
+      {w1:0.20, w2:0.10, w3:0.15, w4:0.35, w5:0.15, w6:0.05,
+       desc:'Open grasslands, coastal shrublands'},
+    'Mountain & terrain':
+      {w1:0.20, w2:0.10, w3:0.15, w4:0.20, w5:0.30, w6:0.05,
+       desc:'Steep forested slopes, canyon terrain'},
+    'High historical risk':
+      {w1:0.15, w2:0.15, w3:0.15, w4:0.15, w5:0.10, w6:0.30,
+       desc:'Regions with recurrent fire history'},
+    'Mediterranean summer':
+      {w1:0.25, w2:0.20, w3:0.30, w4:0.10, w5:0.10, w6:0.05,
+       desc:'Southern Europe, California, Chile (Jun–Sep)'},
+    'Custom (manual)':
+      {w1:0.17, w2:0.17, w3:0.17, w4:0.17, w5:0.17, w6:0.17,
+       desc:'Adjust the sliders below yourself'}
+  };
+
+  var presetKeys = Object.keys(PRESETS);
+  var descLabel  = ui.Label(PRESETS[presetKeys[0]].desc,
+    {fontSize:'10px', color:'#888', margin:'1px 0 5px'});
+
+  var presetSelect = ui.Select({
+    items:       presetKeys,
+    value:       presetKeys[0],
+    style:       {width:'228px'},
+    onChange: function(chosen) {
+      var p = PRESETS[chosen];
+      descLabel.setValue(p.desc);
+      // Update all sliders and their value labels
+      ['w1','w2','w3','w4','w5','w6'].forEach(function(k) {
+        sliders[k].slider.setValue(p[k], true);  // true = trigger onChange
+      });
+    }
+  });
+
+  panel.add(ui.Label('Scenario preset', S.label));
+  panel.add(presetSelect);
+  panel.add(descLabel);
+  panel.add(ui.Label('Fine-tune below if needed:', {fontSize:'10px',color:'#aaa',margin:'3px 0 1px'}));
+
+  // ── Individual weight sliders ──────────────────────────────────────
   var factorDefs = [
     {label:'Vegetation Dryness (VDI)', key:'w1'},
     {label:'Land Surface Temp  (LST)', key:'w2'},
@@ -333,8 +383,14 @@ function buildControlPanel(onRun) {
       ui.Panel.Layout.flow('horizontal'),{margin:'1px 0'}
     ));
     var sl = ui.Slider({min:0, max:1, value:1/6, step:0.05, style:{width:'220px'},
-      onChange: function(v){vl.setValue(v.toFixed(2));}});
-    sliders[f.key] = sl;
+      onChange: function(v){
+        vl.setValue(v.toFixed(2));
+        // Switch preset label to "Custom" when slider is moved manually
+        presetSelect.setValue('Custom (manual)', false);
+        descLabel.setValue(PRESETS['Custom (manual)'].desc);
+      }
+    });
+    sliders[f.key] = {slider: sl, label: vl};
     panel.add(sl);
   });
 
@@ -353,9 +409,9 @@ function buildControlPanel(onRun) {
         layers.get(0).toGeometry(),
         startBox.getValue(),
         endBox.getValue(),
-        { w1:sliders.w1.getValue(), w2:sliders.w2.getValue(),
-          w3:sliders.w3.getValue(), w4:sliders.w4.getValue(),
-          w5:sliders.w5.getValue(), w6:sliders.w6.getValue() },
+        { w1:sliders.w1.slider.getValue(), w2:sliders.w2.slider.getValue(),
+          w3:sliders.w3.slider.getValue(), w4:sliders.w4.slider.getValue(),
+          w5:sliders.w5.slider.getValue(), w6:sliders.w6.slider.getValue() },
         statusLabel
       );
     }
