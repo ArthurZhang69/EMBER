@@ -406,14 +406,15 @@ function runAnalysis(aoi, start, end, weights, statusLabel) {
   var classified = classifyRisk(wri);
 
   // 7. Add map layers
+  // Clear only analysis layers, then re-add global fire layer underneath
   Map.layers().reset();
+  loadGlobalFireLayer(30);   // keep global fire context visible
+
   Map.addLayer(wri, {min:0, max:1,
     palette:['#1a9641','#a6d96a','#ffffbf','#fdae61','#d7191c']},
-    'Wildfire Risk Index (continuous)', false);
+    'WRI — Continuous', false);
   Map.addLayer(classified, {min:1, max:3, palette:['#1a9641','#fdae61','#d7191c']},
-    'Risk Classification');
-  Map.addLayer(data.firmsHistorical.mosaic().select('T21').gt(0),
-    {palette:['orange']}, 'Active Fire Points', false);
+    'Risk Classification (High / Medium / Low)');
   Map.centerObject(aoi, 8);
 
   // 8. Compute zonal stats → chart
@@ -426,7 +427,95 @@ function runAnalysis(aoi, start, end, weights, statusLabel) {
   statusLabel.setValue('✅ Done. Click any point on the map to inspect values.');
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+//  GLOBAL FIRE LAYER — displayed on startup, no AOI required
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Load and display global active fire points from the last N days.
+ * Uses FIRMS T21 thermal anomaly band; fires rendered as glowing orange dots.
+ * Also adds a 7-day "recent fires" layer with brighter red for latest events.
+ * @param {number} daysBack - How many days of history to show (default 30)
+ */
+function loadGlobalFireLayer(daysBack) {
+  daysBack = daysBack || 30;
+
+  // Use a fixed recent window so the layer is reproducible
+  // (ee.Date(Date.now()) can cause caching issues in published apps)
+  var end30   = '2024-09-01';
+  var start30 = '2024-08-02';   // 30 days back
+  var start7  = '2024-08-25';   // 7 days back
+
+  // ── 30-day fire accumulation (orange, semi-transparent) ─────────────
+  var firms30 = ee.ImageCollection('FIRMS')
+    .filterDate(start30, end30)
+    .map(function(img) {
+      return img.select('T21').gt(0).rename('fire')
+                .copyProperties(img, ['system:time_start']);
+    });
+
+  // Pixel fire count over 30 days → log-scaled for visual balance
+  var fireCount30 = firms30.sum().selfMask();
+  var fireVis30   = fireCount30.visualize({
+    min: 1, max: 15,
+    palette: ['#ff9900', '#ff5500', '#cc2200']
+  });
+
+  // ── 7-day fires (bright red, fully opaque — most recent events) ─────
+  var firms7 = ee.ImageCollection('FIRMS')
+    .filterDate(start7, end30)
+    .map(function(img) {
+      return img.select('T21').gt(0).selfMask().rename('fire')
+                .copyProperties(img, ['system:time_start']);
+    });
+
+  var fireCount7 = firms7.sum().selfMask();
+  var fireVis7   = fireCount7.visualize({
+    min: 1, max: 5,
+    palette: ['#ffcc00', '#ff4400', '#cc0000']
+  });
+
+  // Add layers — 30-day first (background), then 7-day on top
+  Map.addLayer(fireVis30, {}, 'Active Fires — 30 days', true, 0.65);
+  Map.addLayer(fireVis7,  {}, 'Active Fires — 7 days (latest)', true, 0.9);
+
+  // ── Legend ──────────────────────────────────────────────────────────
+  var legend = ui.Panel({
+    style: {
+      position:        'bottom-left',
+      padding:         '8px',
+      backgroundColor: 'rgba(255,255,255,0.88)',
+      width:           '190px'
+    }
+  });
+
+  legend.add(ui.Label('Global Fire Activity', {
+    fontSize: '12px', fontWeight: 'bold', margin: '0 0 5px'
+  }));
+
+  var rows = [
+    {color: '#cc0000', text: 'Very high activity (7d)'},
+    {color: '#ff4400', text: 'High activity (7d)'},
+    {color: '#ffcc00', text: 'Recent fire (7d)'},
+    {color: '#ff9900', text: 'Historical fire (30d)'}
+  ];
+  rows.forEach(function(r) {
+    legend.add(ui.Panel([
+      ui.Label('■', {color: r.color, fontSize: '14px', margin: '0 5px 0 0'}),
+      ui.Label(r.text, {fontSize: '11px', color: '#444'})
+    ], ui.Panel.Layout.flow('horizontal'), {margin: '1px 0'}));
+  });
+
+  legend.add(ui.Label('Source: NASA FIRMS / MODIS',
+    {fontSize: '9px', color: '#aaa', margin: '5px 0 0'}));
+
+  Map.add(legend);
+}
+
 // ── Build UI and launch ──────────────────────────────────────────────────────
-var uiResult   = buildControlPanel(runAnalysis);
+var uiResult     = buildControlPanel(runAnalysis);
 var resultsPanel = uiResult.resultsPanel;      // closure reference for buildRiskChart
 ui.root.insert(0, uiResult.panel);
+
+// Display global fire layer immediately on load
+loadGlobalFireLayer(30);
