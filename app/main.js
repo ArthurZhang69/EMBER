@@ -88,13 +88,15 @@ function applyModisCloudMask(image) {
   return ee.Image(masked).copyProperties(image, ['system:time_start']);
 }
 
+// Pre-compute static masks ONCE — avoid reloading on every analysis run
+var _waterMask = ee.Image('JRC/GSW1_4/GlobalSurfaceWater')
+                   .select('occurrence').lt(50).unmask(1);
+var _iceMask   = ee.ImageCollection('MODIS/061/MCD12Q1')
+                   .filterDate('2020-01-01','2021-01-01').first()
+                   .select('LC_Type1').neq(15);
+
 function maskWaterAndIce(image) {
-  var waterMask = ee.Image('JRC/GSW1_4/GlobalSurfaceWater')
-                    .select('occurrence').lt(50).unmask(1);
-  var iceMask   = ee.ImageCollection('MODIS/061/MCD12Q1')
-                    .filterDate('2020-01-01','2021-01-01').first()
-                    .select('LC_Type1').neq(15);
-  return image.updateMask(waterMask).updateMask(iceMask);
+  return image.updateMask(_waterMask).updateMask(_iceMask);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -182,11 +184,12 @@ function normaliseBatch(stack6, aoi) {
 // ══════════════════════════════════════════════════════════════════════════════
 function computeHFD(firms, aoi) {
   var fireCount = firms.map(function(img) {
-    return img.select('T21').gt(0).rename('fire')
-              .copyProperties(img, ['system:time_start']);
+    return img.select('T21').gt(0).rename('fire');
   }).sum().clip(aoi);
-  var kernel = ee.Kernel.gaussian({radius:5000, sigma:2000, units:'meters', normalize:true});
-  return fireCount.convolve(kernel).rename('HFD');
+  // focalMean (3-pixel circle) replaces expensive Gaussian convolution — ~5x faster
+  return fireCount
+    .focalMean({radius: 3, kernelType: 'circle', units: 'pixels'})
+    .rename('HFD');
 }
 
 function computeWRI(normBands, weights) {
@@ -524,10 +527,15 @@ function runAnalysis(aoi, start, end, weights, statusLabel) {
   var wri        = computeWRI(normStack, weights);
   var classified = classifyRisk(wri);
 
-  // 7. Add map layers
-  // Clear only analysis layers, then re-add global fire layer underneath
-  Map.layers().reset();
-  loadGlobalFireLayer(30);   // keep global fire context visible
+  // 7. Add map layers (keep existing fire layers, only reset analysis layers)
+  // Remove previous WRI/classification layers by name if present
+  var layerList = Map.layers();
+  for (var i = layerList.length() - 1; i >= 0; i--) {
+    var name = layerList.get(i).getName();
+    if (name === 'WRI — Continuous' || name === 'Risk Classification (High / Medium / Low)') {
+      Map.layers().remove(layerList.get(i));
+    }
+  }
 
   Map.addLayer(wri, {min:0, max:1,
     palette:['#1a9641','#a6d96a','#ffffbf','#fdae61','#d7191c']},
@@ -536,11 +544,14 @@ function runAnalysis(aoi, start, end, weights, statusLabel) {
     'Risk Classification (High / Medium / Low)');
   Map.centerObject(aoi, 8);
 
-  // 8. Compute zonal stats → chart
+  // 8. Show WRI legend
+  showWRILegend();
+
+  // 9. Compute zonal stats → chart
   var stats = computeZonalStats(classified, aoi);
   buildRiskChart(stats, resultsPanel);
 
-  // 9. Activate click inspector
+  // 10. Activate click inspector
   initInspector(wri, normStack, classified);
 
   statusLabel.setValue('✅ Done. Click any point on the map to inspect values.');
@@ -597,43 +608,83 @@ function loadGlobalFireLayer(daysBack) {
   // Add layers — 30-day first (background), then 7-day on top
   Map.addLayer(fireVis30, {}, 'Active Fires — 30 days', true, 0.65);
   Map.addLayer(fireVis7,  {}, 'Active Fires — 7 days (latest)', true, 0.9);
+}
 
-  // ── Legend ──────────────────────────────────────────────────────────
-  var legend = ui.Panel({
-    style: {
-      position:        'bottom-left',
-      padding:         '8px',
-      backgroundColor: 'rgba(255,255,255,0.88)',
-      width:           '190px'
-    }
+// ══════════════════════════════════════════════════════════════════════════════
+//  LEGENDS — created once, never duplicated
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Fire activity legend (bottom-left, always visible) ───────────────────────
+var fireLegend = ui.Panel({
+  style: {position:'bottom-left', padding:'8px',
+          backgroundColor:'rgba(255,255,255,0.88)', width:'190px'}
+});
+fireLegend.add(ui.Label('Global Fire Activity',
+  {fontSize:'12px', fontWeight:'bold', margin:'0 0 5px'}));
+[{color:'#cc0000', text:'Very high activity (7d)'},
+ {color:'#ff4400', text:'High activity (7d)'},
+ {color:'#ffcc00', text:'Recent fire (7d)'},
+ {color:'#ff9900', text:'Historical fire (30d)'}
+].forEach(function(r) {
+  fireLegend.add(ui.Panel([
+    ui.Label('■', {color:r.color, fontSize:'14px', margin:'0 5px 0 0'}),
+    ui.Label(r.text, {fontSize:'11px', color:'#444'})
+  ], ui.Panel.Layout.flow('horizontal'), {margin:'1px 0'}));
+});
+fireLegend.add(ui.Label('Source: NASA FIRMS / MODIS',
+  {fontSize:'9px', color:'#aaa', margin:'5px 0 0'}));
+Map.add(fireLegend);
+
+// ── WRI legend (bottom-center, shown after analysis) ─────────────────────────
+var wriLegend = ui.Panel({
+  style: {position:'bottom-center', padding:'8px',
+          backgroundColor:'rgba(255,255,255,0.92)', width:'260px'}
+});
+Map.add(wriLegend);   // added once; content filled by showWRILegend()
+
+function showWRILegend() {
+  wriLegend.clear();
+  wriLegend.add(ui.Label('Wildfire Risk Index (WRI)',
+    {fontSize:'12px', fontWeight:'bold', margin:'0 0 5px'}));
+
+  // Colour gradient bar
+  var gradBar = ui.Thumbnail({
+    image: ee.Image.pixelLonLat().select('longitude')
+             .visualize({min:-180, max:180,
+               palette:['#1a9641','#a6d96a','#ffffbf','#fdae61','#d7191c']}),
+    params: {dimensions:'200x12', region:ee.Geometry.Rectangle([-180,-1,180,1])},
+    style:  {width:'220px', height:'14px', margin:'2px 0 3px', stretch:'horizontal'}
   });
+  wriLegend.add(gradBar);
 
-  legend.add(ui.Label('Global Fire Activity', {
-    fontSize: '12px', fontWeight: 'bold', margin: '0 0 5px'
-  }));
+  // Tick labels
+  wriLegend.add(ui.Panel([
+    ui.Label('0.0 — Low',    {fontSize:'10px', color:'#1a9641'}),
+    ui.Label('0.33',         {fontSize:'10px', color:'#aaa',   textAlign:'center', stretch:'horizontal'}),
+    ui.Label('0.67',         {fontSize:'10px', color:'#aaa',   textAlign:'center', stretch:'horizontal'}),
+    ui.Label('1.0 — High',   {fontSize:'10px', color:'#d7191c', textAlign:'right'})
+  ], ui.Panel.Layout.flow('horizontal'), {stretch:'horizontal'}));
 
-  var rows = [
-    {color: '#cc0000', text: 'Very high activity (7d)'},
-    {color: '#ff4400', text: 'High activity (7d)'},
-    {color: '#ffcc00', text: 'Recent fire (7d)'},
-    {color: '#ff9900', text: 'Historical fire (30d)'}
-  ];
-  rows.forEach(function(r) {
-    legend.add(ui.Panel([
-      ui.Label('■', {color: r.color, fontSize: '14px', margin: '0 5px 0 0'}),
-      ui.Label(r.text, {fontSize: '11px', color: '#444'})
-    ], ui.Panel.Layout.flow('horizontal'), {margin: '1px 0'}));
+  // Discrete class key
+  wriLegend.add(ui.Panel([
+    ui.Label('──────────────────────────────',
+             {color:'#ddd', margin:'4px 0 3px', stretch:'horizontal'}),
+  ], ui.Panel.Layout.flow('horizontal')));
+
+  [{color:'#1a9641', label:'Low  (WRI < 0.33)'},
+   {color:'#fdae61', label:'Medium  (0.33 – 0.67)'},
+   {color:'#d7191c', label:'High  (WRI ≥ 0.67)'}
+  ].forEach(function(r) {
+    wriLegend.add(ui.Panel([
+      ui.Label('■', {color:r.color, fontSize:'14px', margin:'0 5px 0 0'}),
+      ui.Label(r.label, {fontSize:'11px', color:'#333'})
+    ], ui.Panel.Layout.flow('horizontal'), {margin:'1px 0'}));
   });
-
-  legend.add(ui.Label('Source: NASA FIRMS / MODIS',
-    {fontSize: '9px', color: '#aaa', margin: '5px 0 0'}));
-
-  Map.add(legend);
 }
 
 // ── Build UI and launch ──────────────────────────────────────────────────────
 var uiResult     = buildControlPanel(runAnalysis);
-var resultsPanel = uiResult.resultsPanel;      // closure reference for buildRiskChart
+var resultsPanel = uiResult.resultsPanel;
 ui.root.insert(0, uiResult.panel);
 
 // Display global fire layer immediately on load
