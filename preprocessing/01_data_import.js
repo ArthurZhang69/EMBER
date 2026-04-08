@@ -1,47 +1,36 @@
 /**
  * 01_data_import.js
  * EMBER — Earth Monitoring of Burn Exposure Risk
- *
  * Module: Preprocessing I — Data Import & Temporal Filtering
- * Owner:  Team Member A
- *
- * Loads and filters all six GEE datasets (MODIS NDVI, MODIS LST, CHIRPS,
- * ERA5-Land, SRTM, FIRMS) to the user-supplied AOI and time window.
- * Exports a unified object consumed by downstream modules.
+ * 
+ * 
+ * 
+ * 
+ * 
  */
 
-/**
- * Load and filter all datasets for a given AOI and date range.
- * @param {ee.Geometry} aoi   - User-defined area of interest
- * @param {string}      start - Start date, e.g. '2023-06-01'
- * @param {string}      end   - End date,   e.g. '2023-09-01'
- * @returns {Object} Dictionary of filtered ImageCollections / Images
- */
 function loadDatasets(aoi, start, end) {
 
-  // ── MODIS NDVI (250 m, 16-day composites) ─────────────────────────────
-  // Scale factor: 0.0001  |  Valid range: -2000–10000
+  // ── MODIS NDVI (250m, 16天合成) ───────────────────────────────────────────
   var ndvi = ee.ImageCollection('MODIS/061/MOD13Q1')
     .filterDate(start, end)
     .filterBounds(aoi)
-    .select(['NDVI', 'SummaryQA']);   // SummaryQA retained for cloud masking
+    .select(['NDVI', 'SummaryQA']);
 
-  // ── MODIS LST (1 km, daily) ────────────────────────────────────────────
-  // Scale factor: 0.02  |  Units after scaling: Kelvin
+  // ── MODIS LST (1km, 逐日) ─────────────────────────────────────────────────
   var lst = ee.ImageCollection('MODIS/061/MOD11A1')
     .filterDate(start, end)
     .filterBounds(aoi)
-    .select(['LST_Day_1km', 'QC_Day']); // QC_Day retained for cloud masking
+    .select(['LST_Day_1km', 'QC_Day']);
 
-  // ── CHIRPS Daily Precipitation (~5.5 km) ──────────────────────────────
-  // Units: mm/day  |  Coverage: 50°S–50°N
+  // ── CHIRPS 降水 (daily) ───────────────────────────────────────────────────
   var chirps = ee.ImageCollection('UCSB-CHG/CHIRPS/DAILY')
     .filterDate(start, end)
     .filterBounds(aoi)
     .select('precipitation');
 
-  // ── ERA5-Land Wind Components (~11 km, daily aggregates) ──────────────
-  // u/v in m/s; scalar wind speed = sqrt(u²+v²)
+  // ── ERA5-Land 风速（计算标量风速）────────────────────────────────────────
+  // 注意：ERA5-Land 的风速数据是 u 和 v 分量，需要计算得到标量风速
   var era5raw = ee.ImageCollection('ECMWF/ERA5_LAND/DAILY_AGGR')
     .filterDate(start, end)
     .filterBounds(aoi)
@@ -55,19 +44,25 @@ function loadDatasets(aoi, start, end) {
       .copyProperties(img, ['system:time_start']);
   });
 
-  // ── SRTM DEM (30 m, static) ───────────────────────────────────────────
-  var srtm = ee.Image('USGS/SRTMGL1_003').clip(aoi);
+  // ── SRTM 地形 (30m, 静态) ─────────────────────────────────────────────────
+  var srtm    = ee.Image('USGS/SRTMGL1_003').clip(aoi);
+  var terrain = ee.Terrain.products(srtm);
+  var slope   = terrain.select('slope');
 
-  // ── FIRMS Active Fire (1 km, daily) ───────────────────────────────────
-  // Current period – near-real-time detection display
+  // ── FIRMS 火点（双时段）──────────────────────────────────────────────────
+  // 当前时段用于显示，历史时段用于计算历史火密度(HFD)
   var firmsRecent = ee.ImageCollection('FIRMS')
     .filterDate(start, end)
     .filterBounds(aoi);
 
-  // Historical 2000–present – used to compute Historical Fire Density (HFD)
   var firmsHistorical = ee.ImageCollection('FIRMS')
     .filterDate('2000-01-01', end)
     .filterBounds(aoi);
+
+  // ── JRC 全球地表水（供 02 模块掩膜使用）──────────────────────────────────
+  var jrcWater = ee.Image('JRC/GSW1_4/GlobalSurfaceWater')
+    .select(['occurrence', 'seasonality'])
+    .clip(aoi);
 
   return {
     ndvi:            ndvi,
@@ -75,8 +70,10 @@ function loadDatasets(aoi, start, end) {
     chirps:          chirps,
     windSpeed:       windSpeed,
     srtm:            srtm,
+    slope:           slope,
     firmsRecent:     firmsRecent,
-    firmsHistorical: firmsHistorical
+    firmsHistorical: firmsHistorical,
+    jrcWater:        jrcWater
   };
 }
 

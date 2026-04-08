@@ -66,7 +66,7 @@ function loadDatasets(aoi, start, end) {
 
   // FIRMS from 2012-present: sufficient for HFD, ~40% fewer images than 2000
   var firmsHistorical = ee.ImageCollection('FIRMS')
-    .filterDate('2012-01-01', end).filterBounds(aoi);
+    .filterDate('2018-01-01', end).filterBounds(aoi);//改了时间
 
   return { ndvi: ndvi, lst: lst, chirps: chirps,
            windSpeed: windSpeed, srtm: srtm,
@@ -90,7 +90,7 @@ function applyModisCloudMask(image) {
 
 // Pre-compute static masks ONCE — avoid reloading on every analysis run
 var _waterMask = ee.Image('JRC/GSW1_4/GlobalSurfaceWater')
-                   .select('occurrence').lt(50).unmask(1);
+                   .select('occurrence').lt(30).unmask(1); //改阈值为30
 var _iceMask   = ee.ImageCollection('MODIS/061/MCD12Q1')
                    .filterDate('2020-01-01','2021-01-01').first()
                    .select('LC_Type1').neq(15);
@@ -112,7 +112,7 @@ function computeLSTAnomaly(lstCol, start, end, aoi) {
   var current  = lstCol.map(toK).mean();
   // Use MOD11A2 (8-day) for baseline — 8× fewer images than MOD11A1 daily
   var baseline = ee.ImageCollection('MODIS/061/MOD11A2')
-    .filterBounds(aoi).filterDate('2000-01-01','2020-12-31')
+    .filterBounds(aoi).filterDate('2018-01-01','2022-12-31') //改了时间
     .filter(ee.Filter.calendarRange(sm, em, 'month'))
     .map(toK).mean();
   return current.subtract(baseline).rename('LST_anomaly');
@@ -124,7 +124,7 @@ function computePrecipAnomaly(chirpsCol, start, end, aoi) {
   var current  = chirpsCol.select('precipitation').mean();
   // CHIRPS pentad for baseline — 5× fewer images than daily
   var baseline = ee.ImageCollection('UCSB-CHG/CHIRPS/PENTAD')
-    .filterBounds(aoi).filterDate('2000-01-01','2020-12-31')
+    .filterBounds(aoi).filterDate('2018-01-01','2022-12-31') //改了时间 
     .filter(ee.Filter.calendarRange(sm, em, 'month'))
     .select('precipitation').mean();
   return baseline.subtract(current).rename('precip_deficit');
