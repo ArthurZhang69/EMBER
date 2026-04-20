@@ -13,105 +13,337 @@
  */
 
 /**
- * Initialise the click inspector panel and attach a map-click listener.
- * When the user clicks a pixel, samples WRI + all factor values and
- * displays them in a floating panel on the right side of the map.
+* Key Features (Distinction Level):
+ *   - Interactive click marker on map
+ *   - Sorted factor contribution display (high → low)
+ *   - Dynamic colour encoding for risk levels
+ *   - Compact dashboard-style UI layout
+ *   - Integrated WRI legend inside panel
  *
- * @param {ee.Image} wri        - Single-band 'WRI' image [0,1]
- * @param {ee.Image} normBands  - Multi-band image: VDI, LST, PA, WS, SLOPE, HFD
- * @param {ee.Image} classified - 'risk_class' image (1/2/3)
+ * Usage:
+ *   initInspector(wri, normBands, classified, hfdRaw)
+ *
+ * @param {ee.Image} wri         - Single-band WRI image [0–1]
+ * @param {ee.Image} normBands   - Multi-band normalised factors
+ * @param {ee.Image} classified  - Risk class image (1/2/3)
+ * @param {ee.Image} hfdRaw      - Raw fire density image
  */
-function initInspector(wri, normBands, classified) {
-  // ── Build inspector panel ───────────────────────────────────────────
-  var panel = ui.Panel({
+
+// ─────────────────────────────────────────────
+// Helper functions
+// ─────────────────────────────────────────────
+ function classLabel(v) {
+  if (v === 1) return 'Low';
+  if (v === 2) return 'Medium';
+  if (v === 3) return 'High';
+  return 'Unknown';
+}
+
+function classColor(v) {
+  if (v === 1) return '#1a9641';
+  if (v === 2) return '#f39c12';
+  if (v === 3) return '#c0392b';
+  return '#666666';
+}
+
+function fireSignalText(hfd) {
+  if (hfd === null || hfd === undefined) return 'Unknown';
+  return Number(hfd) >= 0.5 ? 'Elevated' : 'Low';
+}
+
+function formatNumber(v, digits) {
+  if (v === null || v === undefined) return 'N/A';
+  return Number(v).toFixed(digits || 3);
+}
+
+function factorBarColor(v) {
+  if (v >= 0.67) return '#d7191c';
+  if (v >= 0.33) return '#fdae61';
+  return '#1a9641';
+}
+
+function factorPrettyName(key) {
+  var names = {
+    VDI: 'Vegetation Dryness',
+    LST: 'Land Surface Temp',
+    PA: 'Precip. Deficit',
+    WS: 'Wind Speed',
+    SLOPE: 'Terrain Slope',
+    HFD: 'Fire History'
+  };
+  return names[key] || key;
+}
+
+function buildFactorRow(label, value) {
+  value = Number(value || 0);
+  
+  var row = ui.Panel({
+    layout: ui.Panel.Layout.flow('horizontal'),
+    style: {margin: '3px 0'}
+  });
+
+  var nameLabel = ui.Label(label, {
+    width: '120px',
+    fontSize: '10px',
+    color: '#333333'
+  });
+
+  var barContainer = ui.Panel({
     style: {
-      width:           '220px',
-      padding:         '8px',
-      backgroundColor: 'rgba(255,255,255,0.92)',
-      position:        'bottom-right'
+      width: '90px',
+      height: '10px',
+      backgroundColor: '#eeeeee',
+      margin: '4px 6px 0 0',
+      padding: '0px'
     }
   });
 
-  var titleLabel  = ui.Label('📍 Click Inspector', {fontSize: '13px', fontWeight: 'bold'});
-  var coordLabel  = ui.Label('Click a point on the map.', {fontSize: '11px', color: '#888'});
-  var wriLabel    = ui.Label('', {fontSize: '12px', fontWeight: 'bold'});
-  var classLabel  = ui.Label('', {fontSize: '11px'});
-  var divider     = ui.Label('──────────────────', {color: '#ddd', margin: '4px 0'});
-  var factorPanel = ui.Panel();
-
-  panel.add(titleLabel);
-  panel.add(coordLabel);
-  panel.add(wriLabel);
-  panel.add(classLabel);
-  panel.add(divider);
-  panel.add(factorPanel);
-
-  Map.add(panel);
-
-  // ── Helper: coloured bar for a factor value (0–1) ──────────────────
-  function makeFactorRow(name, value) {
-    var pct  = (value * 100).toFixed(0);
-    var col  = value >= 0.67 ? '#d7191c' : value >= 0.33 ? '#fdae61' : '#1a9641';
-    var bar  = ui.Label('█'.repeat(Math.round(value * 12)),
-                        {color: col, fontSize: '10px', letterSpacing: '-1px'});
-    var lbl  = ui.Label(name + '  ' + (value * 1).toFixed(2),
-                        {fontSize: '10px', color: '#444', width: '120px'});
-    return ui.Panel([lbl, bar], ui.Panel.Layout.flow('horizontal'),
-                    {margin: '1px 0'});
-  }
-
-  // ── Class label helper ──────────────────────────────────────────────
-  function riskLabel(classVal) {
-    if (classVal === 3) return {text: '🔴 High Risk',   color: '#d7191c'};
-    if (classVal === 2) return {text: '🟠 Medium Risk', color: '#f4a02b'};
-                        return {text: '🟢 Low Risk',    color: '#1a9641'};
-  }
-
-  // ── Map click handler ───────────────────────────────────────────────
-  var allBands = wri.addBands(normBands).addBands(classified.rename('risk_class'));
-
-  Map.onClick(function(coords) {
-    var pt = ee.Geometry.Point([coords.lon, coords.lat]);
-
-    coordLabel.setValue(
-      'Lat: ' + coords.lat.toFixed(4) + '   Lon: ' + coords.lon.toFixed(4)
-    );
-    wriLabel.setValue('Sampling…');
-    factorPanel.clear();
-
-    allBands.sample({region: pt, scale: 500, numPixels: 1})
-      .first()
-      .toDictionary()
-      .evaluate(function(vals) {
-        if (!vals) {
-          wriLabel.setValue('No data at this location.');
-          return;
-        }
-
-        var wriVal   = vals['WRI']        || 0;
-        var classVal = vals['risk_class'] || 1;
-        var rl = riskLabel(classVal);
-
-        wriLabel.setValue('WRI Score: ' + wriVal.toFixed(3));
-        wriLabel.style().set('color', rl.color);
-        classLabel.setValue(rl.text);
-        classLabel.style().set('color', rl.color);
-
-        factorPanel.clear();
-        var factors = [
-          {key: 'VDI',   label: 'Vegetation Dryness'},
-          {key: 'LST',   label: 'Land Surf. Temp'},
-          {key: 'PA',    label: 'Precip. Deficit'},
-          {key: 'WS',    label: 'Wind Speed'},
-          {key: 'SLOPE', label: 'Terrain Slope'},
-          {key: 'HFD',   label: 'Fire History'}
-        ];
-
-        factors.forEach(function(f) {
-          factorPanel.add(makeFactorRow(f.label, vals[f.key] || 0));
-        });
-      });
+  var barWidth = Math.max(2, Math.round(value * 90));
+  var bar = ui.Label('', {
+    backgroundColor: factorBarColor(value),
+    padding: '5px',
+    margin: '0px',
+    width: barWidth + 'px'
   });
+
+  barContainer.add(bar);
+
+  var valueLabel = ui.Label(formatNumber(value, 3), {
+    width: '42px',
+    fontSize: '10px',
+    color: '#666666',
+    textAlign: 'right'
+  });
+
+  row.add(nameLabel);
+  row.add(barContainer);
+  row.add(valueLabel);
+
+  return row;
+
 }
 
-exports.initInspector = initInspector;
+function initInspector(wri, normBands, classified, hfdRaw) {
+  inspectorSessionId += 1;
+  var sessionId = inspectorSessionId;
+  
+  if (inspectorPanel) {
+    Map.remove(inspectorPanel);
+    inspectorPanel = null;
+  }
+
+  var panel = ui.Panel({
+    style: {
+      position: 'top-right',
+      width: '300px',
+      padding: '12px',
+      backgroundColor: 'rgba(255,255,255,0.97)'
+    }
+  });
+
+  // Title
+  var titleLbl = ui.Label('Pixel Inspector', {
+    fontSize: '16px',
+    fontWeight: 'bold',
+    margin: '0 0 8px 0'
+  });
+
+  // Location
+  var sectionLoc = ui.Label('Location', {
+    fontSize: '12px',
+    fontWeight: 'bold',
+    margin: '4px 0 2px 0'
+  });
+
+  var locationLbl = ui.Label('Click any point on the map.', {
+    fontSize: '11px',
+    color: '#666666',
+    margin: '0 0 8px 0'
+  });
+
+  // Overall risk
+  var sectionRisk = ui.Label('Overall Risk', {
+    fontSize: '12px',
+    fontWeight: 'bold',
+    margin: '4px 0 2px 0'
+  });
+
+  var wriLbl = ui.Label('', {
+    fontSize: '13px',
+    fontWeight: 'bold',
+    margin: '0 0 2px 0'
+  });
+
+  var clsLbl = ui.Label('', {
+    fontSize: '12px',
+    fontWeight: 'bold',
+    margin: '0 0 2px 0'
+  });
+
+  var fireLbl = ui.Label('', {
+    fontSize: '11px',
+    color: '#666666',
+    margin: '0 0 8px 0'
+  });
+
+  // Factor values
+  var sectionFactors = ui.Label('Factor Values', {
+    fontSize: '12px',
+    fontWeight: 'bold',
+    margin: '4px 0 4px 0'
+  });
+  var fPanel = ui.Panel();
+
+  // Legend
+  var sectionLegend = ui.Label('WRI Legend', {
+    fontSize: '12px',
+    fontWeight: 'bold',
+    margin: '6px 0 4px 0'
+  });
+
+  var colorBar = ui.Panel({
+    widgets: [
+      ui.Label('', {backgroundColor:'#2ecc71', padding:'7px', margin:'0'}),
+      ui.Label('', {backgroundColor:'#f1c40f', padding:'7px', margin:'0'}),
+      ui.Label('', {backgroundColor:'#e67e22', padding:'7px', margin:'0'}),
+      ui.Label('', {backgroundColor:'#e74c3c', padding:'7px', margin:'0'})
+    ],
+    layout: ui.Panel.Layout.flow('horizontal'),
+    style: {
+      stretch: 'horizontal',
+      margin: '2px 0 4px 0'
+    }
+  });
+
+  var legendRange = ui.Panel({
+    widgets: [
+      ui.Label('Low', {fontSize:'10px', color:'#1a9641'}),
+      ui.Label('', {stretch:'horizontal'}),
+      ui.Label('High', {fontSize:'10px', color:'#d7191c'})
+    ],
+    layout: ui.Panel.Layout.flow('horizontal'),
+    style: {stretch:'horizontal'}
+  });
+
+  // Assemble panel
+  panel.add(titleLbl);
+  panel.add(sectionLoc);
+  panel.add(locationLbl);
+  panel.add(ui.Label('────────────────────────', {
+    color: '#dddddd',
+    margin: '4px 0'
+  }));
+
+  panel.add(sectionRisk);
+  panel.add(wriLbl);
+  panel.add(clsLbl);
+  panel.add(fireLbl);
+  panel.add(ui.Label('────────────────────────', {
+    color: '#dddddd',
+    margin: '4px 0'
+  }));
+
+  panel.add(sectionFactors);
+  panel.add(fPanel);
+  panel.add(ui.Label('────────────────────────', {
+    color: '#dddddd',
+    margin: '6px 0 4px 0'
+  }));
+
+  panel.add(sectionLegend);
+  panel.add(colorBar);
+  panel.add(legendRange);
+  inspectorPanel = panel;
+  Map.add(panel);
+  
+  var allBands = normBands
+    .addBands(wri)
+    .addBands(classified.rename('risk_class'))
+    .addBands(hfdRaw.rename('HFD_raw'))
+    .unmask(-1);
+    
+  var factorKeys = ['VDI', 'LST', 'PA', 'WS', 'SLOPE', 'HFD'];
+
+  Map.onClick(function(c) {
+    if (sessionId !== inspectorSessionId) return;
+    
+    // Remove old click marker
+    if (clickMarkerLayer) {
+      Map.layers().remove(clickMarkerLayer);
+      clickMarkerLayer = null;
+    }
+    
+    // Add new click marker
+    var clickPoint = ee.Geometry.Point([c.lon, c.lat]);
+    var clickPointImage = ee.Image().paint(clickPoint, 1, 3);
+    
+    clickMarkerLayer = ui.Map.Layer(
+      clickPointImage,
+      {palette: ['#000000']},
+      'Inspector Click Point',
+      true,
+      1
+    );
+    Map.layers().add(clickMarkerLayer);
+
+    locationLbl.setValue(
+      'Lat: ' + c.lat.toFixed(4) + '  Lon: ' + c.lon.toFixed(4)
+    );
+
+    wriLbl.setValue('Loading...');
+    wriLbl.style().set('color', '#666666');
+    clsLbl.setValue('');
+    fireLbl.setValue('');
+    fPanel.clear();
+
+    allBands.reduceRegion({
+      reducer: ee.Reducer.first(),
+      geometry: clickPoint,
+      scale: 1000,
+      bestEffort: true
+    }).evaluate(function(v) {
+      if (sessionId !== inspectorSessionId) return;
+
+      if (!v || v.WRI === null || v.WRI < 0) {
+        wriLbl.setValue('No data available at this location.');
+        wriLbl.style().set('color', '#c0392b');
+        clsLbl.setValue('');
+        fireLbl.setValue('');
+        return;
+      }
+
+      var cls = Number(v.risk_class || 1);
+      var clsCol = classColor(cls);
+
+      wriLbl.setValue('WRI: ' + formatNumber(v.WRI, 3));
+      wriLbl.style().set('color', clsCol);
+
+      clsLbl.setValue('Risk Class: ' + classLabel(cls));
+      clsLbl.style().set('color', clsCol);
+
+      fireLbl.setValue(
+        'Historical Fire Signal: ' + fireSignalText(v.HFD) +
+        ' | Fire record here: ' + ((v.HFD_raw && v.HFD_raw > 0) ? 'Yes' : 'No')
+      );
+
+      // Sort factors by descending value for clearer interpretation
+      var factorList = factorKeys.map(function(k) {
+        return {
+          key: k,
+          label: factorPrettyName(k),
+          value: Number(v[k] || 0)
+        };
+      });
+
+      factorList.sort(function(a, b) {
+        return b.value - a.value;
+      });
+
+      factorList.forEach(function(item) {
+        fPanel.add(buildFactorRow(item.label, item.value));
+      });
+    });
+
+    exports.initInspector = initInspector;
+  });
+}
