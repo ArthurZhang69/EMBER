@@ -90,7 +90,7 @@ function normaliseWeights(rawWeights) {
     total += safeWeight;
   });
 
-  if (!(total > 0)) {
+  if ((total > 0)) {
     return cloneWeights(DEFAULT_WEIGHTS);
   }
 
@@ -105,6 +105,37 @@ function normaliseWeights(rawWeights) {
 // Global references to avoid duplicate inspector panels / stale click handlers
 var inspectorPanel = null;
 var inspectorSessionId = 0;
+
+var loadingPanel = null;
+var clickMarkerLayer = null;
+
+function showLoading(message) {
+  if (loadingPanel) Map.remove(loadingPanel);
+
+  loadingPanel = ui.Panel({
+    widgets: [
+      ui.Label(message || 'Running analysis...', {
+        fontSize: '14px',
+        fontWeight: 'bold',
+        color: '#333'
+      })
+    ],
+    style: {
+      position: 'top-center',
+      padding: '10px 16px',
+      backgroundColor: 'rgba(255,255,255,0.95)'
+    }
+  });
+
+  Map.add(loadingPanel);
+}
+
+function hideLoading() {
+  if (loadingPanel) {
+    Map.remove(loadingPanel);
+    loadingPanel = null;
+  }
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  MODULE 01 — DATA IMPORT
@@ -538,6 +569,184 @@ function computeZonalStats(wri, classified, normBands, weights, aoi) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+//  MODULE 08 — MAP LAYERS & CONTROLS (FULL FIXED VERSION)
+// ══════════════════════════════════════════════════════════════════════════════
+var layerControlPanel = null;
+var basemapPanel = null;
+var riskOpacitySlider = null;
+
+function removeExistingPanel(panelRef) {
+  if (panelRef) {
+    Map.remove(panelRef);
+  }
+}
+
+function buildBasemapSelector() {
+  removeExistingPanel(basemapPanel);
+
+  var panel = ui.Panel({
+    style: {
+      position: 'top-left',
+      padding: '10px',
+      backgroundColor: 'rgba(255,255,255,0.95)',
+      width: '250px'
+    }
+  });
+
+  panel.add(ui.Label('Basemap', {
+    fontSize: '12px',
+    fontWeight: 'bold',
+    margin: '0 0 4px 0'
+  }));
+
+  var select = ui.Select({
+    items: ['HYBRID', 'TERRAIN', 'SATELLITE', 'ROADMAP'],
+    value: 'HYBRID',
+    style: {width: '230px'},
+    onChange: function(value) {
+      Map.setOptions(value);
+    }
+  });
+
+  panel.add(select);
+  basemapPanel = panel;
+  Map.add(panel);
+}
+
+function buildLayerControls(wriLayer, classLayer, fire30Layer, fire7Layer) {
+  removeExistingPanel(layerControlPanel);
+
+  var panel = ui.Panel({
+    style: {
+      position: 'top-left',
+      padding: '10px',
+      backgroundColor: 'rgba(255,255,255,0.95)',
+      width: '250px',
+      margin: '80px 0 0 0'
+    }
+  });
+
+  panel.add(ui.Label('Layer Controls', {
+    fontSize: '12px',
+    fontWeight: 'bold',
+    margin: '0 0 6px 0'
+  }));
+
+  var wriCheckbox = ui.Checkbox({
+    label: 'WRI Continuous',
+    value: wriLayer.getShown(),
+    onChange: function(v) {
+      wriLayer.setShown(v);
+    }
+  });
+
+  var classCheckbox = ui.Checkbox({
+    label: 'Risk Classes',
+    value: classLayer.getShown(),
+    onChange: function(v) {
+      classLayer.setShown(v);
+    }
+  });
+
+  var fire30Checkbox = ui.Checkbox({
+    label: 'Active Fires — 30 days',
+    value: fire30Layer ? fire30Layer.getShown() : false,
+    onChange: function(v) {
+      if (fire30Layer) fire30Layer.setShown(v);
+    }
+  });
+
+  var fire7Checkbox = ui.Checkbox({
+    label: 'Active Fires — 7 days',
+    value: fire7Layer ? fire7Layer.getShown() : false,
+    onChange: function(v) {
+      if (fire7Layer) fire7Layer.setShown(v);
+    }
+  });
+
+  panel.add(wriCheckbox);
+  panel.add(classCheckbox);
+  panel.add(fire30Checkbox);
+  panel.add(fire7Checkbox);
+
+  panel.add(ui.Label('Risk Class Opacity', {
+    fontSize: '11px',
+    color: '#555',
+    margin: '8px 0 2px 0'
+  }));
+
+  riskOpacitySlider = ui.Slider({
+    min: 0,
+    max: 1,
+    value: 0.75,
+    step: 0.05,
+    style: {width: '230px'},
+    onChange: function(v) {
+      classLayer.setOpacity(v);
+    }
+  });
+
+  panel.add(riskOpacitySlider);
+
+  layerControlPanel = panel;
+  Map.add(panel);
+}
+
+function addAnalysisLayers(wri, classified, aoi) {
+  Map.centerObject(aoi, 8);
+
+  var wriLayer = ui.Map.Layer(
+    wri,
+    {
+      min: 0,
+      max: 1,
+      palette: ['#2ecc71', '#f1c40f', '#e67e22', '#e74c3c']
+    },
+    'WRI — Continuous',
+    true,
+    1
+  );
+
+  var classLayer = ui.Map.Layer(
+    classified,
+    {
+      min: 1,
+      max: 3,
+      palette: ['#2ecc71', '#f39c12', '#c0392b']
+    },
+    'Risk Classification (High / Medium / Low)',
+    true,
+    0.35
+  );
+
+  Map.layers().add(wriLayer);
+  Map.layers().add(classLayer);
+
+  return {
+    wriLayer: wriLayer,
+    classLayer: classLayer
+  };
+}
+
+function getFireLayersFromMap() {
+  var fire30Layer = null;
+  var fire7Layer = null;
+
+  var layers = Map.layers();
+  for (var i = 0; i < layers.length(); i++) {
+    var lyr = layers.get(i);
+    var name = lyr.getName();
+
+    if (name === 'Active Fires — 30 days') fire30Layer = lyr;
+    if (name === 'Active Fires — 7 days (latest)') fire7Layer = lyr;
+  }
+
+  return {
+    fire30Layer: fire30Layer,
+    fire7Layer: fire7Layer
+  };
+}
+// ══════════════════════════════════════════════════════════════════════════════
 //  MODULE 10 — CHART
 // ══════════════════════════════════════════════════════════════════════════════
 function buildRiskChart(stats, targetPanel) {
@@ -667,102 +876,318 @@ function buildRiskChart(stats, targetPanel) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  MODULE 11 — CLICK INSPECTOR
+//  MODULE 11 — INSPECTOR
 // ══════════════════════════════════════════════════════════════════════════════
-function initInspector(wri, normBands, classified) {
+
+function classLabel(v) {
+  if (v === 1) return 'Low';
+  if (v === 2) return 'Medium';
+  if (v === 3) return 'High';
+  return 'Unknown';
+}
+
+function classColor(v) {
+  if (v === 1) return '#1a9641';
+  if (v === 2) return '#f39c12';
+  if (v === 3) return '#c0392b';
+  return '#666666';
+}
+
+function fireSignalText(hfd) {
+  if (hfd === null || hfd === undefined) return 'Unknown';
+  return Number(hfd) >= 0.5 ? 'Elevated' : 'Low';
+}
+
+function formatNumber(v, digits) {
+  if (v === null || v === undefined) return 'N/A';
+  return Number(v).toFixed(digits || 3);
+}
+
+function factorBarColor(v) {
+  if (v >= 0.67) return '#d7191c';
+  if (v >= 0.33) return '#fdae61';
+  return '#1a9641';
+}
+
+function factorPrettyName(key) {
+  var names = {
+    VDI: 'Vegetation Dryness',
+    LST: 'Land Surface Temp',
+    PA: 'Precip. Deficit',
+    WS: 'Wind Speed',
+    SLOPE: 'Terrain Slope',
+    HFD: 'Fire History'
+  };
+  return names[key] || key;
+}
+
+function buildFactorRow(label, value) {
+  value = Number(value || 0);
+  
+  var row = ui.Panel({
+    layout: ui.Panel.Layout.flow('horizontal'),
+    style: {margin: '3px 0'}
+  });
+
+  var nameLabel = ui.Label(label, {
+    width: '120px',
+    fontSize: '10px',
+    color: '#333333'
+  });
+
+  var barContainer = ui.Panel({
+    style: {
+      width: '90px',
+      height: '10px',
+      backgroundColor: '#eeeeee',
+      margin: '4px 6px 0 0',
+      padding: '0px'
+    }
+  });
+
+  var barWidth = Math.max(2, Math.round(value * 90));
+  var bar = ui.Label('', {
+    backgroundColor: factorBarColor(value),
+    padding: '5px',
+    margin: '0px',
+    width: barWidth + 'px'
+  });
+
+  barContainer.add(bar);
+
+  var valueLabel = ui.Label(formatNumber(value, 3), {
+    width: '42px',
+    fontSize: '10px',
+    color: '#666666',
+    textAlign: 'right'
+  });
+
+  row.add(nameLabel);
+  row.add(barContainer);
+  row.add(valueLabel);
+
+  return row;
+
+}
+
+function initInspector(wri, normBands, classified, hfdRaw) {
   inspectorSessionId += 1;
   var sessionId = inspectorSessionId;
-
+  
   if (inspectorPanel) {
     Map.remove(inspectorPanel);
     inspectorPanel = null;
   }
 
   var panel = ui.Panel({
-    style: {width: '220px', padding: '8px', position: 'bottom-right'}
+    style: {
+      position: 'top-right',
+      width: '300px',
+      padding: '12px',
+      backgroundColor: 'rgba(255,255,255,0.97)'
+    }
   });
 
-  var coordLbl = ui.Label('Click a point on the map.', {
-    fontSize: '11px',
-    color: '#888'
+  // Title
+  var titleLbl = ui.Label('Pixel Inspector', {
+    fontSize: '16px',
+    fontWeight: 'bold',
+    margin: '0 0 8px 0'
   });
-  var wriLbl = ui.Label('', {
+
+  // Location
+  var sectionLoc = ui.Label('Location', {
     fontSize: '12px',
-    fontWeight: 'bold'
+    fontWeight: 'bold',
+    margin: '4px 0 2px 0'
   });
+
+  var locationLbl = ui.Label('Click any point on the map.', {
+    fontSize: '11px',
+    color: '#666666',
+    margin: '0 0 8px 0'
+  });
+
+  // Overall risk
+  var sectionRisk = ui.Label('Overall Risk', {
+    fontSize: '12px',
+    fontWeight: 'bold',
+    margin: '4px 0 2px 0'
+  });
+
+  var wriLbl = ui.Label('', {
+    fontSize: '13px',
+    fontWeight: 'bold',
+    margin: '0 0 2px 0'
+  });
+
   var clsLbl = ui.Label('', {
-    fontSize: '11px'
+    fontSize: '12px',
+    fontWeight: 'bold',
+    margin: '0 0 2px 0'
+  });
+
+  var fireLbl = ui.Label('', {
+    fontSize: '11px',
+    color: '#666666',
+    margin: '0 0 8px 0'
+  });
+
+  // Factor values
+  var sectionFactors = ui.Label('Factor Values', {
+    fontSize: '12px',
+    fontWeight: 'bold',
+    margin: '4px 0 4px 0'
   });
   var fPanel = ui.Panel();
 
-  panel.add(ui.Label('📍 Click Inspector', {
-    fontSize: '13px',
-    fontWeight: 'bold'
-  }));
-  panel.add(coordLbl);
-  panel.add(wriLbl);
-  panel.add(clsLbl);
-  panel.add(ui.Label('──────────────────', {
-    color: '#ddd',
+  // Legend
+  var sectionLegend = ui.Label('WRI Legend', {
+    fontSize: '12px',
+    fontWeight: 'bold',
+    margin: '6px 0 4px 0'
+  });
+
+  var colorBar = ui.Panel({
+    widgets: [
+      ui.Label('', {backgroundColor:'#2ecc71', padding:'7px', margin:'0'}),
+      ui.Label('', {backgroundColor:'#f1c40f', padding:'7px', margin:'0'}),
+      ui.Label('', {backgroundColor:'#e67e22', padding:'7px', margin:'0'}),
+      ui.Label('', {backgroundColor:'#e74c3c', padding:'7px', margin:'0'})
+    ],
+    layout: ui.Panel.Layout.flow('horizontal'),
+    style: {
+      stretch: 'horizontal',
+      margin: '2px 0 4px 0'
+    }
+  });
+
+  var legendRange = ui.Panel({
+    widgets: [
+      ui.Label('Low', {fontSize:'10px', color:'#1a9641'}),
+      ui.Label('', {stretch:'horizontal'}),
+      ui.Label('High', {fontSize:'10px', color:'#d7191c'})
+    ],
+    layout: ui.Panel.Layout.flow('horizontal'),
+    style: {stretch:'horizontal'}
+  });
+
+  // Assemble panel
+  panel.add(titleLbl);
+  panel.add(sectionLoc);
+  panel.add(locationLbl);
+  panel.add(ui.Label('────────────────────────', {
+    color: '#dddddd',
     margin: '4px 0'
   }));
-  panel.add(fPanel);
 
+  panel.add(sectionRisk);
+  panel.add(wriLbl);
+  panel.add(clsLbl);
+  panel.add(fireLbl);
+  panel.add(ui.Label('────────────────────────', {
+    color: '#dddddd',
+    margin: '4px 0'
+  }));
+
+  panel.add(sectionFactors);
+  panel.add(fPanel);
+  panel.add(ui.Label('────────────────────────', {
+    color: '#dddddd',
+    margin: '6px 0 4px 0'
+  }));
+
+  panel.add(sectionLegend);
+  panel.add(colorBar);
+  panel.add(legendRange);
   inspectorPanel = panel;
   Map.add(panel);
-
-  var allBands = wri.addBands(normBands)
+  
+  var allBands = normBands
+    .addBands(wri)
     .addBands(classified.rename('risk_class'))
+    .addBands(hfdRaw.rename('HFD_raw'))
     .unmask(-1);
+    
+  var factorKeys = ['VDI', 'LST', 'PA', 'WS', 'SLOPE', 'HFD'];
 
   Map.onClick(function(c) {
-    // Ignore stale click handlers from previous runs
     if (sessionId !== inspectorSessionId) return;
+    
+    // Remove old click marker
+    if (clickMarkerLayer) {
+      Map.layers().remove(clickMarkerLayer);
+      clickMarkerLayer = null;
+    }
+    
+    // Add new click marker
+    var clickPoint = ee.Geometry.Point([c.lon, c.lat]);
+    var clickPointImage = ee.Image().paint(clickPoint, 1, 3);
+    
+    clickMarkerLayer = ui.Map.Layer(
+      clickPointImage,
+      {palette: ['#000000']},
+      'Inspector Click Point',
+      true,
+      1
+    );
+    Map.layers().add(clickMarkerLayer);
 
-    var pt = ee.Geometry.Point([c.lon, c.lat]);
-    coordLbl.setValue('Lat: ' + c.lat.toFixed(4) + '  Lon: ' + c.lon.toFixed(4));
-    wriLbl.setValue('Sampling…');
+    locationLbl.setValue(
+      'Lat: ' + c.lat.toFixed(4) + '  Lon: ' + c.lon.toFixed(4)
+    );
+
+    wriLbl.setValue('Loading...');
+    wriLbl.style().set('color', '#666666');
     clsLbl.setValue('');
+    fireLbl.setValue('');
     fPanel.clear();
 
     allBands.reduceRegion({
       reducer: ee.Reducer.first(),
-      geometry: pt,
+      geometry: clickPoint,
       scale: 1000,
       bestEffort: true
     }).evaluate(function(v) {
       if (sessionId !== inspectorSessionId) return;
 
-      if (!v || v['WRI'] === null || v['WRI'] < 0) {
-        wriLbl.setValue('No data at this location.');
+      if (!v || v.WRI === null || v.WRI < 0) {
+        wriLbl.setValue('No data available at this location.');
+        wriLbl.style().set('color', '#c0392b');
         clsLbl.setValue('');
+        fireLbl.setValue('');
         return;
       }
 
-      var cls = v['risk_class'] || 1;
-      var col = cls === 3 ? '#d7191c' : cls === 2 ? '#f4a02b' : '#1a9641';
-      var txt = cls === 3 ? '🔴 High Risk' : cls === 2 ? '🟠 Medium Risk' : '🟢 Low Risk';
+      var cls = Number(v.risk_class || 1);
+      var clsCol = classColor(cls);
 
-      wriLbl.setValue('WRI: ' + (v['WRI'] || 0).toFixed(3));
-      wriLbl.style().set('color', col);
-      clsLbl.setValue(txt);
-      clsLbl.style().set('color', col);
+      wriLbl.setValue('WRI: ' + formatNumber(v.WRI, 3));
+      wriLbl.style().set('color', clsCol);
 
-      [['VDI', 'Vegetation Dryness'],
-       ['LST', 'Land Surf. Temp'],
-       ['PA', 'Precip. Deficit'],
-       ['WS', 'Wind Speed'],
-       ['SLOPE', 'Terrain Slope'],
-       ['HFD', 'Fire History']].forEach(function(f) {
-        var val = v[f[0]] || 0;
-        var col2 = val >= 0.67 ? '#d7191c' : val >= 0.33 ? '#fdae61' : '#1a9641';
+      clsLbl.setValue('Risk Class: ' + classLabel(cls));
+      clsLbl.style().set('color', clsCol);
 
-        fPanel.add(ui.Panel([
-          ui.Label(f[1], {fontSize: '10px', width: '120px'}),
-          ui.Label(Array(Math.round(val * 10) + 1).join('█'),
-            {color: col2, fontSize: '10px'}),
-          ui.Label(val.toFixed(2), {fontSize: '10px', color: '#666'})
-        ], ui.Panel.Layout.flow('horizontal'), {margin: '1px 0'}));
+      fireLbl.setValue(
+        'Historical Fire Signal: ' + fireSignalText(v.HFD) +
+        ' | Fire record here: ' + ((v.HFD_raw && v.HFD_raw > 0) ? 'Yes' : 'No')
+      );
+
+      // Sort factors by descending value for clearer interpretation
+      var factorList = factorKeys.map(function(k) {
+        return {
+          key: k,
+          label: factorPrettyName(k),
+          value: Number(v[k] || 0)
+        };
+      });
+
+      factorList.sort(function(a, b) {
+        return b.value - a.value;
+      });
+
+      factorList.forEach(function(item) {
+        fPanel.add(buildFactorRow(item.label, item.value));
       });
     });
   });
@@ -956,6 +1381,7 @@ function buildControlPanel(onRun) {
 //  MAIN — wire everything together
 // ══════════════════════════════════════════════════════════════════════════════
 function runAnalysis(aoi, start, end, weights, statusLabel) {
+  showLoading('Running wildfire risk analysis...');
   var data = loadDatasets(aoi, start, end);
 
   var ndviComp = data.ndvi.map(applyModisCloudMask).median();
@@ -988,29 +1414,25 @@ function runAnalysis(aoi, start, end, weights, statusLabel) {
   var layerList = Map.layers();
   for (var i = layerList.length() - 1; i >= 0; i--) {
     var name = layerList.get(i).getName();
-    if (name === 'WRI — Continuous' || name === 'Risk Classification (High / Medium / Low)') {
+    if (
+      name === 'WRI — Continuous' ||
+      name === 'Risk Classification (High / Medium / Low)' ||
+      name === 'Inspector Click Point'
+    ) {
       Map.layers().remove(layerList.get(i));
     }
   }
 
-  Map.addLayer(
-    wri,
-    {
-      min:0,
-      max:1,
-      palette:['#1a9641','#a6d96a','#ffffbf','#fdae61','#d7191c']
-    },
-    'WRI — Continuous',
-    false
-  );
+  var addedLayers = addAnalysisLayers(wri, classified, aoi);
 
-  Map.addLayer(
-    classified,
-    {min:1, max:3, palette:['#1a9641','#fdae61','#d7191c']},
-    'Risk Classification (High / Medium / Low)'
+  var fireLayers = getFireLayersFromMap();
+  buildBasemapSelector();
+  buildLayerControls(
+    addedLayers.wriLayer,
+    addedLayers.classLayer,
+    fireLayers.fire30Layer,
+    fireLayers.fire7Layer
   );
-
-  Map.centerObject(aoi, 8);
 
   showWRILegend();
 
@@ -1018,8 +1440,8 @@ function runAnalysis(aoi, start, end, weights, statusLabel) {
   print('Zonal Stats:', stats);
   buildRiskChart(stats, resultsPanel);
 
-  initInspector(wri, normStack, classified);
-
+  initInspector(wri, normStack, classified, hfdRaw);
+  hideLoading();
   statusLabel.setValue('✅ Done. Click any point on the map to inspect values.');
 }
 
@@ -1071,9 +1493,9 @@ function loadGlobalFireLayer(daysBack) {
 var fireLegend = ui.Panel({
   style: {
     position:'bottom-left',
-    padding:'8px',
+    padding:'10px',
     backgroundColor:'rgba(255,255,255,0.88)',
-    width:'190px'
+    width:'250px'
   }
 });
 
@@ -1089,10 +1511,14 @@ fireLegend.add(ui.Label('Global Fire Activity', {
   {color:'#ffcc00', text:'Recent fire (7d)'},
   {color:'#ff9900', text:'Historical fire (30d)'}
 ].forEach(function(r) {
-  fireLegend.add(ui.Panel([
-    ui.Label('■', {color:r.color, fontSize:'14px', margin:'0 5px 0 0'}),
-    ui.Label(r.text, {fontSize:'11px', color:'#444'})
-  ], ui.Panel.Layout.flow('horizontal'), {margin:'1px 0'}));
+fireLegend.add(ui.Panel([
+  ui.Label('■', {color:r.color, fontSize:'14px', margin:'0 6px 0 0'}),
+  ui.Label(r.text, {
+    fontSize:'11px',
+    color:'#444',
+    width:'190px'
+  })
+], ui.Panel.Layout.flow('horizontal'), {margin:'2px 0'}));
 });
 
 fireLegend.add(ui.Label('Source: NASA FIRMS / MODIS', {
@@ -1105,10 +1531,11 @@ Map.add(fireLegend);
 
 var wriLegend = ui.Panel({
   style: {
-    position:'bottom-center',
-    padding:'8px',
-    backgroundColor:'rgba(255,255,255,0.92)',
-    width:'260px'
+    position:'top-right',
+    padding:'12px',
+    backgroundColor:'rgba(255,255,255,0.95)',
+    width:'300px',
+    margin:'350px 0 0 0'
   }
 });
 
@@ -1124,24 +1551,24 @@ function showWRILegend() {
   }));
 
   var colorBar = ui.Panel([
-    ui.Label('', {backgroundColor:'#fee8c8', padding:'8px', margin:'0'}),
-    ui.Label('', {backgroundColor:'#fdbb84', padding:'8px', margin:'0'}),
-    ui.Label('', {backgroundColor:'#fc8d59', padding:'8px', margin:'0'}),
-    ui.Label('', {backgroundColor:'#ef6548', padding:'8px', margin:'0'}),
-    ui.Label('', {backgroundColor:'#b30000', padding:'8px', margin:'0'})
+    ui.Label('', {backgroundColor:'#1a9641', padding:'8px', margin:'0', stretch:'horizontal'}),
+    ui.Label('', {backgroundColor:'#a6d96a', padding:'8px', margin:'0', stretch:'horizontal'}),
+    ui.Label('', {backgroundColor:'#ffffbf', padding:'8px', margin:'0', stretch:'horizontal'}),
+    ui.Label('', {backgroundColor:'#fdae61', padding:'8px', margin:'0', stretch:'horizontal'}),
+    ui.Label('', {backgroundColor:'#d7191c', padding:'8px', margin:'0', stretch:'horizontal'})
   ], ui.Panel.Layout.flow('horizontal'), {
     stretch:'horizontal',
     margin:'2px 0 3px 0'
   });
-
   wriLegend.add(colorBar);
 
-  wriLegend.add(ui.Panel([
-    ui.Label('0.0 — Low', {fontSize:'10px', color:'#1a9641'}),
+  var tickPanel = ui.Panel([
+    ui.Label('0.0', {fontSize:'10px', color:'#1a9641', textAlign:'left'}),
     ui.Label('0.33', {fontSize:'10px', color:'#aaa', textAlign:'center', stretch:'horizontal'}),
     ui.Label('0.67', {fontSize:'10px', color:'#aaa', textAlign:'center', stretch:'horizontal'}),
-    ui.Label('1.0 — High', {fontSize:'10px', color:'#d7191c', textAlign:'right'})
-  ], ui.Panel.Layout.flow('horizontal'), {stretch:'horizontal'}));
+    ui.Label('1.0', {fontSize:'10px', color:'#d7191c', textAlign:'right'})
+  ], ui.Panel.Layout.flow('horizontal'), {stretch:'horizontal'});
+  wriLegend.add(tickPanel);
 
   wriLegend.add(ui.Panel([
     ui.Label('──────────────────────────────', {
