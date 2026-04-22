@@ -37,7 +37,7 @@
 
 The application is designed to support pre-season fire risk assessment and resource allocation decisions, providing actionable spatial insights without requiring users to have a background in remote sensing or GIS.
 
-**Live Application:** `[link to be added upon deployment]`
+**Live Application:** https://arthurzhang69.github.io/EMBER/
 
 **GitHub Repository:** https://github.com/ArthurZhang69/EMBER
 
