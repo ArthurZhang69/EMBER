@@ -27,9 +27,56 @@
 // ══════════════════════════════════════════════════════════════════════════════
 
 // ── 0. Map initialisation ─────────────────────────────────────────────────────
-Map.setOptions('HYBRID');
+// Custom dark basemap tuned to match the EMBER outer-shell palette.
+// Palette cues: --bg #080b10, --border rgba(255,80,30,.18), --text-dim #6a7385.
+var EMBER_DARK_STYLE = [
+  {elementType: 'geometry',           stylers: [{color: '#0f141c'}]},
+  {elementType: 'labels.text.fill',   stylers: [{color: '#6a7385'}]},
+  {elementType: 'labels.text.stroke', stylers: [{color: '#080b10'}]},
+  {elementType: 'labels.icon',        stylers: [{visibility: 'off'}]},
+
+  {featureType: 'administrative',                elementType: 'geometry',        stylers: [{color: '#2a3442'}]},
+  {featureType: 'administrative.country',        elementType: 'geometry.stroke', stylers: [{color: '#3a4656'}]},
+  {featureType: 'administrative.province',       elementType: 'geometry.stroke', stylers: [{color: '#30384a'}]},
+  {featureType: 'administrative.land_parcel',                                    stylers: [{visibility: 'off'}]},
+
+  {featureType: 'landscape.natural',   elementType: 'geometry', stylers: [{color: '#141923'}]},
+  {featureType: 'landscape.man_made',  elementType: 'geometry', stylers: [{color: '#10151e'}]},
+
+  {featureType: 'poi',                 stylers: [{visibility: 'off'}]},
+  {featureType: 'poi.park',   elementType: 'geometry', stylers: [{color: '#161d28'}]},
+
+  {featureType: 'road',            elementType: 'geometry',        stylers: [{color: '#1d2633'}]},
+  {featureType: 'road',            elementType: 'labels.text.fill',stylers: [{color: '#5a6578'}]},
+  {featureType: 'road.highway',    elementType: 'geometry',        stylers: [{color: '#2a3442'}]},
+  {featureType: 'road.highway',    elementType: 'labels.text.fill',stylers: [{color: '#7a8598'}]},
+  {featureType: 'road.arterial',   elementType: 'geometry',        stylers: [{color: '#222a36'}]},
+  {featureType: 'road.local',      elementType: 'geometry',        stylers: [{color: '#1a222e'}]},
+
+  {featureType: 'transit',         stylers: [{visibility: 'off'}]},
+
+  {featureType: 'water', elementType: 'geometry',        stylers: [{color: '#060910'}]},
+  {featureType: 'water', elementType: 'labels.text.fill',stylers: [{color: '#4a5565'}]}
+];
+
+var EMBER_MAP_STYLES = {
+  DARK: EMBER_DARK_STYLE
+};
+
+// Register the custom style AND set it as the active basemap in one call.
+// The user can still switch to HYBRID / SATELLITE / TERRAIN / ROADMAP via the
+// outer-shell dropdown — handled by the SET_BASEMAP postMessage listener below.
+Map.setOptions('DARK', EMBER_MAP_STYLES);
 Map.setCenter(0, 20, 3);
-Map.drawingTools().setShown(true);
+
+// Hide ALL the GEE-provided map chrome — the outer shell owns every control,
+// including zoom. Dark-themed +/- buttons in index.html drive Map.setZoom()
+// via postMessage, and scroll-wheel zoom is enabled by the map's greedy
+// gesture handling (no Ctrl required).
+Map.setControlVisibility({ all: false });
+
+Map.drawingTools().setShown(false);               // hide the native white toolbar
+Map.drawingTools().setLinked(false);              // suppress the "geometry" chip
 Map.drawingTools().setDrawModes(['rectangle', 'polygon']);
 // Shared constants / helpers for Modules 05–06
 var FACTOR_SPECS = [
@@ -90,7 +137,9 @@ function normaliseWeights(rawWeights) {
     total += safeWeight;
   });
 
-  if ((total > 0)) {
+  // If the caller passed all-zero / invalid weights, fall back to defaults
+  // instead of dividing by zero below.
+  if (total <= 0) {
     return cloneWeights(DEFAULT_WEIGHTS);
   }
 
@@ -102,40 +151,9 @@ function normaliseWeights(rawWeights) {
   return normalised;
 }
 
-// Global references to avoid duplicate inspector panels / stale click handlers
-var inspectorPanel = null;
+// Session id gates stale inspector click handlers after each new run
 var inspectorSessionId = 0;
-
-var loadingPanel = null;
 var clickMarkerLayer = null;
-
-function showLoading(message) {
-  if (loadingPanel) Map.remove(loadingPanel);
-
-  loadingPanel = ui.Panel({
-    widgets: [
-      ui.Label(message || 'Running analysis...', {
-        fontSize: '14px',
-        fontWeight: 'bold',
-        color: '#333'
-      })
-    ],
-    style: {
-      position: 'top-center',
-      padding: '10px 16px',
-      backgroundColor: 'rgba(255,255,255,0.95)'
-    }
-  });
-
-  Map.add(loadingPanel);
-}
-
-function hideLoading() {
-  if (loadingPanel) {
-    Map.remove(loadingPanel);
-    loadingPanel = null;
-  }
-}
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  MODULE 01 — DATA IMPORT
@@ -569,129 +587,9 @@ function computeZonalStats(wri, classified, normBands, weights, aoi) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  MODULE 08 — MAP LAYERS & CONTROLS (FULL FIXED VERSION)
+//  MODULE 08 — MAP LAYERS (headless — no on-map controls)
+//  Basemap / layer toggle / opacity are driven by postMessage from index.html.
 // ══════════════════════════════════════════════════════════════════════════════
-var layerControlPanel = null;
-var basemapPanel = null;
-var riskOpacitySlider = null;
-
-function removeExistingPanel(panelRef) {
-  if (panelRef) {
-    Map.remove(panelRef);
-  }
-}
-
-function buildBasemapSelector() {
-  removeExistingPanel(basemapPanel);
-
-  var panel = ui.Panel({
-    style: {
-      position: 'top-left',
-      padding: '10px',
-      backgroundColor: 'rgba(255,255,255,0.95)',
-      width: '250px'
-    }
-  });
-
-  panel.add(ui.Label('Basemap', {
-    fontSize: '12px',
-    fontWeight: 'bold',
-    margin: '0 0 4px 0'
-  }));
-
-  var select = ui.Select({
-    items: ['HYBRID', 'TERRAIN', 'SATELLITE', 'ROADMAP'],
-    value: 'HYBRID',
-    style: {width: '230px'},
-    onChange: function(value) {
-      Map.setOptions(value);
-    }
-  });
-
-  panel.add(select);
-  basemapPanel = panel;
-  Map.add(panel);
-}
-
-function buildLayerControls(wriLayer, classLayer, fire30Layer, fire7Layer) {
-  removeExistingPanel(layerControlPanel);
-
-  var panel = ui.Panel({
-    style: {
-      position: 'top-left',
-      padding: '10px',
-      backgroundColor: 'rgba(255,255,255,0.95)',
-      width: '250px',
-      margin: '80px 0 0 0'
-    }
-  });
-
-  panel.add(ui.Label('Layer Controls', {
-    fontSize: '12px',
-    fontWeight: 'bold',
-    margin: '0 0 6px 0'
-  }));
-
-  var wriCheckbox = ui.Checkbox({
-    label: 'WRI Continuous',
-    value: wriLayer.getShown(),
-    onChange: function(v) {
-      wriLayer.setShown(v);
-    }
-  });
-
-  var classCheckbox = ui.Checkbox({
-    label: 'Risk Classes',
-    value: classLayer.getShown(),
-    onChange: function(v) {
-      classLayer.setShown(v);
-    }
-  });
-
-  var fire30Checkbox = ui.Checkbox({
-    label: 'Active Fires — 30 days',
-    value: fire30Layer ? fire30Layer.getShown() : false,
-    onChange: function(v) {
-      if (fire30Layer) fire30Layer.setShown(v);
-    }
-  });
-
-  var fire7Checkbox = ui.Checkbox({
-    label: 'Active Fires — 7 days',
-    value: fire7Layer ? fire7Layer.getShown() : false,
-    onChange: function(v) {
-      if (fire7Layer) fire7Layer.setShown(v);
-    }
-  });
-
-  panel.add(wriCheckbox);
-  panel.add(classCheckbox);
-  panel.add(fire30Checkbox);
-  panel.add(fire7Checkbox);
-
-  panel.add(ui.Label('Risk Class Opacity', {
-    fontSize: '11px',
-    color: '#555',
-    margin: '8px 0 2px 0'
-  }));
-
-  riskOpacitySlider = ui.Slider({
-    min: 0,
-    max: 1,
-    value: 0.75,
-    step: 0.05,
-    style: {width: '230px'},
-    onChange: function(v) {
-      classLayer.setOpacity(v);
-    }
-  });
-
-  panel.add(riskOpacitySlider);
-
-  layerControlPanel = panel;
-  Map.add(panel);
-}
-
 function addAnalysisLayers(wri, classified, aoi) {
   Map.centerObject(aoi, 8);
 
@@ -722,155 +620,79 @@ function addAnalysisLayers(wri, classified, aoi) {
   Map.layers().add(wriLayer);
   Map.layers().add(classLayer);
 
+  // Hide the AOI drawing polygon now that results are visible.
+  // Do this on the GEE side directly (no postMessage round-trip) so it
+  // takes effect as soon as the analysis layers appear on the map.
+  var drawLayers = Map.drawingTools().layers();
+  for (var a = 0; a < drawLayers.length(); a++) {
+    drawLayers.get(a).setShown(false);
+  }
+  // Tell the outer dashboard to uncheck the AOI Polygon toggle.
+  postToParent({ type: 'AOI_HIDDEN' });
+
   return {
     wriLayer: wriLayer,
     classLayer: classLayer
   };
 }
 
-function getFireLayersFromMap() {
-  var fire30Layer = null;
-  var fire7Layer = null;
-
-  var layers = Map.layers();
-  for (var i = 0; i < layers.length(); i++) {
-    var lyr = layers.get(i);
-    var name = lyr.getName();
-
-    if (name === 'Active Fires — 30 days') fire30Layer = lyr;
-    if (name === 'Active Fires — 7 days (latest)') fire7Layer = lyr;
-  }
-
-  return {
-    fire30Layer: fire30Layer,
-    fire7Layer: fire7Layer
-  };
-}
 // ══════════════════════════════════════════════════════════════════════════════
-//  MODULE 10 — CHART
+//  MODULE 10 — STATS PAYLOAD
 // ══════════════════════════════════════════════════════════════════════════════
-function buildRiskChart(stats, targetPanel) {
-  targetPanel.clear();
-
-  stats.evaluate(function(s) {
-    if (!s) {
-      targetPanel.add(ui.Label('No statistics returned.', {
-        fontSize: '11px',
-        color: '#888'
-      }));
+/**
+ * Evaluate zonal stats server-side and push a structured payload to index.html.
+ * All chart / table rendering happens in the outer dashboard.
+ */
+function postStatsToParent(stats) {
+  stats.evaluate(function(s, err) {
+    if (err || !s) {
+      postStatus('error', 'Stats computation failed: ' + (err || 'empty'));
       return;
     }
 
-    // ── A. AOI risk statistics ───────────────────────────────────────────────
-    targetPanel.add(ui.Label('AOI Risk Statistics', {
-      fontSize: '12px',
-      fontWeight: 'bold',
-      margin: '4px 0'
-    }));
-
-    targetPanel.add(ui.Label(
-      'High: ' + (s.high.area || 0).toFixed(2) + ' km² (' + (s.high.pct || 0).toFixed(1) + '%)',
-      {fontSize: '11px', color: '#d7191c'}
-    ));
-
-    targetPanel.add(ui.Label(
-      'Medium: ' + (s.medium.area || 0).toFixed(2) + ' km² (' + (s.medium.pct || 0).toFixed(1) + '%)',
-      {fontSize: '11px', color: '#f4a02b'}
-    ));
-
-    targetPanel.add(ui.Label(
-      'Low: ' + (s.low.area || 0).toFixed(2) + ' km² (' + (s.low.pct || 0).toFixed(1) + '%)',
-      {fontSize: '11px', color: '#1a9641'}
-    ));
-
-    targetPanel.add(ui.Label(
-      'Total AOI area (classified): ' + (s.total || 0).toFixed(2) + ' km²',
-      {fontSize: '11px', color: '#666'}
-    ));
-
-    targetPanel.add(ui.Label(
-      'AOI area (geometry): ' + (s.aoi_area_km2 || 0).toFixed(2) + ' km²',
-      {fontSize: '11px', color: '#666'}
-    ));
-
-    targetPanel.add(ui.Label(
-      'Adaptive scale used: ' + (s.adaptive_scale_m || 0).toFixed(0) + ' m',
-      {fontSize: '11px', color: '#666', margin: '0 0 6px 0'}
-    ));
-
-    // ── B. WRI summary ───────────────────────────────────────────────────────
-    targetPanel.add(ui.Label('WRI Summary', {
-      fontSize: '12px',
-      fontWeight: 'bold',
-      margin: '6px 0 2px 0'
-    }));
-
-    targetPanel.add(ui.Label(
-      'Mean WRI: ' + ((s.wri_summary && s.wri_summary.mean) || 0).toFixed(3),
-      {fontSize: '11px'}
-    ));
-
-    targetPanel.add(ui.Label(
-      'Max WRI: ' + ((s.wri_summary && s.wri_summary.max) || 0).toFixed(3),
-      {fontSize: '11px', margin: '0 0 6px 0'}
-    ));
-
-    // ── C. WRI histogram as text ────────────────────────────────────────────
-    targetPanel.add(ui.Label('WRI Distribution (Histogram)', {
-      fontSize: '12px',
-      fontWeight: 'bold',
-      margin: '6px 0 2px 0'
-    }));
-
-    var hist = s.histogram || [];
-    if (hist.length > 0) {
-      var step = 0.1;
-
-      hist.forEach(function(bin) {
-        if (!bin || bin.length < 2) return;
-
-        var lower = Number(bin[0]);
-        var upper = lower + step;
-        var count = Number(bin[1] || 0);
-
-        targetPanel.add(ui.Label(
-          lower.toFixed(1) + '–' + upper.toFixed(1) + ': ' + count,
-          {fontSize: '10px', color: '#666'}
-        ));
-      });
-    } else {
-      targetPanel.add(ui.Label('No histogram available.', {
-        fontSize: '11px',
-        color: '#888'
-      }));
-    }
-
-    // ── D. Factor contribution ranking ──────────────────────────────────────
-    targetPanel.add(ui.Label('Factor Contribution Ranking', {
-      fontSize: '12px',
-      fontWeight: 'bold',
-      margin: '6px 0 2px 0'
-    }));
+    var wriMean = (s.wri_summary && s.wri_summary.mean) || 0;
+    var wriMax  = (s.wri_summary && s.wri_summary.max)  || 0;
+    var highKm  = (s.high   && s.high.area)   || 0;
+    var medKm   = (s.medium && s.medium.area) || 0;
+    var lowKm   = (s.low    && s.low.area)    || 0;
+    var highPct = (s.high   && s.high.pct)    || 0;
+    var medPct  = (s.medium && s.medium.pct)  || 0;
+    var lowPct  = (s.low    && s.low.pct)     || 0;
 
     var cs = s.contribution_scores || {};
-    var contribList = [
-      {name: 'Vegetation Dryness', value: cs.VDI || 0},
-      {name: 'Land Surface Temp', value: cs.LST || 0},
-      {name: 'Precip. Deficit', value: cs.PA || 0},
-      {name: 'Wind Speed', value: cs.WS || 0},
-      {name: 'Terrain Slope', value: cs.SLOPE || 0},
-      {name: 'Fire History', value: cs.HFD || 0}
-    ];
+    var contribution = [
+      {key: 'VDI',   name: 'Vegetation Dryness', value: Number(cs.VDI   || 0)},
+      {key: 'LST',   name: 'Land Surface Temp',  value: Number(cs.LST   || 0)},
+      {key: 'PA',    name: 'Precip. Deficit',    value: Number(cs.PA    || 0)},
+      {key: 'WS',    name: 'Wind Speed',         value: Number(cs.WS    || 0)},
+      {key: 'SLOPE', name: 'Terrain Slope',      value: Number(cs.SLOPE || 0)},
+      {key: 'HFD',   name: 'Fire History',       value: Number(cs.HFD   || 0)}
+    ].sort(function(a, b) { return b.value - a.value; });
 
-    contribList.sort(function(a, b) {
-      return b.value - a.value;
+    var histogram = (s.histogram || []).map(function(bin) {
+      if (!bin || bin.length < 2) return {lower: 0, count: 0};
+      return {lower: Number(bin[0]), count: Number(bin[1] || 0)};
     });
 
-    contribList.forEach(function(item, idx) {
-      targetPanel.add(ui.Label(
-        (idx + 1) + '. ' + item.name + ' — ' + item.value.toFixed(3),
-        {fontSize: '11px'}
-      ));
+    postToParent({
+      type: 'EMBER_STATS',
+      // Headline metrics
+      wri:       wriMean,
+      wriMax:    wriMax,
+      fireArea:  Math.round(highKm),     // High-risk area (km²)
+      totalKm2:  Number(s.total || 0),
+      aoiKm2:    Number(s.aoi_area_km2 || 0),
+      scaleM:    Number(s.adaptive_scale_m || 0),
+      // Class breakdown
+      high:      Math.round(highPct),
+      medium:    Math.round(medPct),
+      low:       Math.round(lowPct),
+      highKm:    highKm,
+      medKm:     medKm,
+      lowKm:     lowKm,
+      // Rich payloads for the outer panels
+      histogram: histogram,
+      contribution: contribution
     });
   });
 }
@@ -879,251 +701,38 @@ function buildRiskChart(stats, targetPanel) {
 //  MODULE 11 — INSPECTOR
 // ══════════════════════════════════════════════════════════════════════════════
 
-function classLabel(v) {
+function classLabelForValue(v) {
   if (v === 1) return 'Low';
   if (v === 2) return 'Medium';
   if (v === 3) return 'High';
   return 'Unknown';
 }
 
-function classColor(v) {
-  if (v === 1) return '#1a9641';
-  if (v === 2) return '#f39c12';
-  if (v === 3) return '#c0392b';
-  return '#666666';
-}
-
-function fireSignalText(hfd) {
-  if (hfd === null || hfd === undefined) return 'Unknown';
-  return Number(hfd) >= 0.5 ? 'Elevated' : 'Low';
-}
-
-function formatNumber(v, digits) {
-  if (v === null || v === undefined) return 'N/A';
-  return Number(v).toFixed(digits || 3);
-}
-
-function factorBarColor(v) {
-  if (v >= 0.67) return '#d7191c';
-  if (v >= 0.33) return '#fdae61';
-  return '#1a9641';
-}
-
-function factorPrettyName(key) {
-  var names = {
-    VDI: 'Vegetation Dryness',
-    LST: 'Land Surface Temp',
-    PA: 'Precip. Deficit',
-    WS: 'Wind Speed',
-    SLOPE: 'Terrain Slope',
-    HFD: 'Fire History'
-  };
-  return names[key] || key;
-}
-
-function buildFactorRow(label, value) {
-  value = Number(value || 0);
-  
-  var row = ui.Panel({
-    layout: ui.Panel.Layout.flow('horizontal'),
-    style: {margin: '3px 0'}
-  });
-
-  var nameLabel = ui.Label(label, {
-    width: '120px',
-    fontSize: '10px',
-    color: '#333333'
-  });
-
-  var barContainer = ui.Panel({
-    style: {
-      width: '90px',
-      height: '10px',
-      backgroundColor: '#eeeeee',
-      margin: '4px 6px 0 0',
-      padding: '0px'
-    }
-  });
-
-  var barWidth = Math.max(2, Math.round(value * 90));
-  var bar = ui.Label('', {
-    backgroundColor: factorBarColor(value),
-    padding: '5px',
-    margin: '0px',
-    width: barWidth + 'px'
-  });
-
-  barContainer.add(bar);
-
-  var valueLabel = ui.Label(formatNumber(value, 3), {
-    width: '42px',
-    fontSize: '10px',
-    color: '#666666',
-    textAlign: 'right'
-  });
-
-  row.add(nameLabel);
-  row.add(barContainer);
-  row.add(valueLabel);
-
-  return row;
-
-}
-
+/**
+ * Register a Map.onClick handler that, for each click, samples the WRI /
+ * classification / factor bands at that point and ships the result to the
+ * outer dashboard via postMessage. All rendering happens in index.html.
+ */
 function initInspector(wri, normBands, classified, hfdRaw) {
   inspectorSessionId += 1;
   var sessionId = inspectorSessionId;
-  
-  if (inspectorPanel) {
-    Map.remove(inspectorPanel);
-    inspectorPanel = null;
-  }
 
-  var panel = ui.Panel({
-    style: {
-      position: 'top-right',
-      width: '300px',
-      padding: '12px',
-      backgroundColor: 'rgba(255,255,255,0.97)'
-    }
-  });
-
-  // Title
-  var titleLbl = ui.Label('Pixel Inspector', {
-    fontSize: '16px',
-    fontWeight: 'bold',
-    margin: '0 0 8px 0'
-  });
-
-  // Location
-  var sectionLoc = ui.Label('Location', {
-    fontSize: '12px',
-    fontWeight: 'bold',
-    margin: '4px 0 2px 0'
-  });
-
-  var locationLbl = ui.Label('Click any point on the map.', {
-    fontSize: '11px',
-    color: '#666666',
-    margin: '0 0 8px 0'
-  });
-
-  // Overall risk
-  var sectionRisk = ui.Label('Overall Risk', {
-    fontSize: '12px',
-    fontWeight: 'bold',
-    margin: '4px 0 2px 0'
-  });
-
-  var wriLbl = ui.Label('', {
-    fontSize: '13px',
-    fontWeight: 'bold',
-    margin: '0 0 2px 0'
-  });
-
-  var clsLbl = ui.Label('', {
-    fontSize: '12px',
-    fontWeight: 'bold',
-    margin: '0 0 2px 0'
-  });
-
-  var fireLbl = ui.Label('', {
-    fontSize: '11px',
-    color: '#666666',
-    margin: '0 0 8px 0'
-  });
-
-  // Factor values
-  var sectionFactors = ui.Label('Factor Values', {
-    fontSize: '12px',
-    fontWeight: 'bold',
-    margin: '4px 0 4px 0'
-  });
-  var fPanel = ui.Panel();
-
-  // Legend
-  var sectionLegend = ui.Label('WRI Legend', {
-    fontSize: '12px',
-    fontWeight: 'bold',
-    margin: '6px 0 4px 0'
-  });
-
-  var colorBar = ui.Panel({
-    widgets: [
-      ui.Label('', {backgroundColor:'#2ecc71', padding:'7px', margin:'0'}),
-      ui.Label('', {backgroundColor:'#f1c40f', padding:'7px', margin:'0'}),
-      ui.Label('', {backgroundColor:'#e67e22', padding:'7px', margin:'0'}),
-      ui.Label('', {backgroundColor:'#e74c3c', padding:'7px', margin:'0'})
-    ],
-    layout: ui.Panel.Layout.flow('horizontal'),
-    style: {
-      stretch: 'horizontal',
-      margin: '2px 0 4px 0'
-    }
-  });
-
-  var legendRange = ui.Panel({
-    widgets: [
-      ui.Label('Low', {fontSize:'10px', color:'#1a9641'}),
-      ui.Label('', {stretch:'horizontal'}),
-      ui.Label('High', {fontSize:'10px', color:'#d7191c'})
-    ],
-    layout: ui.Panel.Layout.flow('horizontal'),
-    style: {stretch:'horizontal'}
-  });
-
-  // Assemble panel
-  panel.add(titleLbl);
-  panel.add(sectionLoc);
-  panel.add(locationLbl);
-  panel.add(ui.Label('────────────────────────', {
-    color: '#dddddd',
-    margin: '4px 0'
-  }));
-
-  panel.add(sectionRisk);
-  panel.add(wriLbl);
-  panel.add(clsLbl);
-  panel.add(fireLbl);
-  panel.add(ui.Label('────────────────────────', {
-    color: '#dddddd',
-    margin: '4px 0'
-  }));
-
-  panel.add(sectionFactors);
-  panel.add(fPanel);
-  panel.add(ui.Label('────────────────────────', {
-    color: '#dddddd',
-    margin: '6px 0 4px 0'
-  }));
-
-  panel.add(sectionLegend);
-  panel.add(colorBar);
-  panel.add(legendRange);
-  inspectorPanel = panel;
-  Map.add(panel);
-  
   var allBands = normBands
     .addBands(wri)
     .addBands(classified.rename('risk_class'))
     .addBands(hfdRaw.rename('HFD_raw'))
     .unmask(-1);
-    
-  var factorKeys = ['VDI', 'LST', 'PA', 'WS', 'SLOPE', 'HFD'];
 
   Map.onClick(function(c) {
     if (sessionId !== inspectorSessionId) return;
-    
-    // Remove old click marker
+
+    // Refresh the click-marker layer so users can see what they picked
     if (clickMarkerLayer) {
       Map.layers().remove(clickMarkerLayer);
       clickMarkerLayer = null;
     }
-    
-    // Add new click marker
     var clickPoint = ee.Geometry.Point([c.lon, c.lat]);
     var clickPointImage = ee.Image().paint(clickPoint, 1, 3);
-    
     clickMarkerLayer = ui.Map.Layer(
       clickPointImage,
       {palette: ['#000000']},
@@ -1133,255 +742,61 @@ function initInspector(wri, normBands, classified, hfdRaw) {
     );
     Map.layers().add(clickMarkerLayer);
 
-    locationLbl.setValue(
-      'Lat: ' + c.lat.toFixed(4) + '  Lon: ' + c.lon.toFixed(4)
-    );
-
-    wriLbl.setValue('Loading...');
-    wriLbl.style().set('color', '#666666');
-    clsLbl.setValue('');
-    fireLbl.setValue('');
-    fPanel.clear();
+    // Announce "click started" so the outer panel can show a loading state
+    postToParent({
+      type: 'PIXEL_INSPECT_START',
+      lat: c.lat,
+      lon: c.lon
+    });
 
     allBands.reduceRegion({
       reducer: ee.Reducer.first(),
       geometry: clickPoint,
       scale: 1000,
       bestEffort: true
-    }).evaluate(function(v) {
+    }).evaluate(function(v, err) {
       if (sessionId !== inspectorSessionId) return;
 
-      if (!v || v.WRI === null || v.WRI < 0) {
-        wriLbl.setValue('No data available at this location.');
-        wriLbl.style().set('color', '#c0392b');
-        clsLbl.setValue('');
-        fireLbl.setValue('');
+      if (err || !v || v.WRI === null || v.WRI === undefined || v.WRI < 0) {
+        postToParent({
+          type: 'PIXEL_INSPECT',
+          lat: c.lat,
+          lon: c.lon,
+          hasData: false,
+          error: err ? String(err) : null
+        });
         return;
       }
 
       var cls = Number(v.risk_class || 1);
-      var clsCol = classColor(cls);
-
-      wriLbl.setValue('WRI: ' + formatNumber(v.WRI, 3));
-      wriLbl.style().set('color', clsCol);
-
-      clsLbl.setValue('Risk Class: ' + classLabel(cls));
-      clsLbl.style().set('color', clsCol);
-
-      fireLbl.setValue(
-        'Historical Fire Signal: ' + fireSignalText(v.HFD) +
-        ' | Fire record here: ' + ((v.HFD_raw && v.HFD_raw > 0) ? 'Yes' : 'No')
-      );
-
-      // Sort factors by descending value for clearer interpretation
-      var factorList = factorKeys.map(function(k) {
-        return {
-          key: k,
-          label: factorPrettyName(k),
-          value: Number(v[k] || 0)
-        };
-      });
-
-      factorList.sort(function(a, b) {
-        return b.value - a.value;
-      });
-
-      factorList.forEach(function(item) {
-        fPanel.add(buildFactorRow(item.label, item.value));
+      postToParent({
+        type: 'PIXEL_INSPECT',
+        hasData: true,
+        lat: c.lat,
+        lon: c.lon,
+        wri: Number(v.WRI),
+        riskClass: cls,
+        riskLabel: classLabelForValue(cls),
+        hfdNorm: v.HFD === null || v.HFD === undefined ? null : Number(v.HFD),
+        hfdRaw: v.HFD_raw === null || v.HFD_raw === undefined ? 0 : Number(v.HFD_raw),
+        factors: {
+          VDI:   Number(v.VDI   || 0),
+          LST:   Number(v.LST   || 0),
+          PA:    Number(v.PA    || 0),
+          WS:    Number(v.WS    || 0),
+          SLOPE: Number(v.SLOPE || 0),
+          HFD:   Number(v.HFD   || 0)
+        }
       });
     });
   });
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  MODULE 09 — CONTROL PANEL
+//  MAIN — driven by postMessage commands from index.html
 // ══════════════════════════════════════════════════════════════════════════════
-function buildControlPanel(onRun) {
-  var S = {
-    title:   {fontSize:'18px', fontWeight:'bold', color:'#d7191c', margin:'4px 0 2px'},
-    sub:     {fontSize:'11px', color:'#888', margin:'0 0 6px'},
-    section: {fontSize:'12px', fontWeight:'bold', color:'#333', margin:'8px 0 3px'},
-    label:   {fontSize:'11px', color:'#555', margin:'2px 0 1px'},
-    div:     {color:'#ddd', margin:'4px 0'},
-    input:   {width:'220px'},
-    btn:     {width:'228px', margin:'6px 0'}
-  };
-
-  var panel = ui.Panel({style:{width:'250px', padding:'10px'}});
-  panel.add(ui.Label('🔥 EMBER', S.title));
-  panel.add(ui.Label('Earth Monitoring of Burn Exposure Risk', S.sub));
-  panel.add(ui.Label('──────────────────────────', S.div));
-
-  panel.add(ui.Label('Analysis Period', S.section));
-  panel.add(ui.Label('Start date (YYYY-MM-DD)', S.label));
-  var startBox = ui.Textbox({value:'2023-06-01', style:S.input});
-  panel.add(startBox);
-  panel.add(ui.Label('End date (YYYY-MM-DD)', S.label));
-  var endBox = ui.Textbox({value:'2023-09-01', style:S.input});
-  panel.add(endBox);
-
-  panel.add(ui.Label('──────────────────────────', S.div));
-  panel.add(ui.Label('Area of Interest', S.section));
-  panel.add(ui.Label('Use the ✏ toolbar on the map to draw a rectangle or polygon.',
-                     {fontSize:'11px',color:'#666'}));
-  panel.add(ui.Button({
-    label:'✕  Clear geometry',
-    style:S.btn,
-    onClick: function() {
-      Map.drawingTools().layers().reset();
-    }
-  }));
-
-  panel.add(ui.Label('──────────────────────────', S.div));
-  panel.add(ui.Label('Factor Weights (0 – 1)', S.section));
-
-  var PRESETS = {
-    'Equal weights (default)': {
-      w1:0.17, w2:0.17, w3:0.17, w4:0.17, w5:0.17, w6:0.17,
-      desc:'Balanced — no prior knowledge of the region'
-    },
-    'Drought & heat stress': {
-      w1:0.30, w2:0.25, w3:0.25, w4:0.10, w5:0.05, w6:0.05,
-      desc:'Arid/semi-arid regions during dry season'
-    },
-    'Wind-driven fire': {
-      w1:0.20, w2:0.10, w3:0.15, w4:0.35, w5:0.15, w6:0.05,
-      desc:'Open grasslands, coastal shrublands'
-    },
-    'Mountain & terrain': {
-      w1:0.20, w2:0.10, w3:0.15, w4:0.20, w5:0.30, w6:0.05,
-      desc:'Steep forested slopes, canyon terrain'
-    },
-    'High historical risk': {
-      w1:0.15, w2:0.15, w3:0.15, w4:0.15, w5:0.10, w6:0.30,
-      desc:'Regions with recurrent fire history'
-    },
-    'Mediterranean summer': {
-      w1:0.25, w2:0.20, w3:0.30, w4:0.10, w5:0.10, w6:0.05,
-      desc:'Southern Europe, California, Chile (Jun–Sep)'
-    },
-    'Custom (manual)': {
-      w1:0.17, w2:0.17, w3:0.17, w4:0.17, w5:0.17, w6:0.17,
-      desc:'Adjust the sliders below yourself'
-    }
-  };
-
-  var presetKeys = Object.keys(PRESETS);
-  var descLabel = ui.Label(PRESETS[presetKeys[0]].desc, {
-    fontSize:'10px',
-    color:'#888',
-    margin:'1px 0 5px'
-  });
-
-  var presetSelect = ui.Select({
-    items: presetKeys,
-    value: presetKeys[0],
-    style: {width:'228px'},
-    onChange: function(chosen) {
-      var p = PRESETS[chosen];
-      descLabel.setValue(p.desc);
-      ['w1','w2','w3','w4','w5','w6'].forEach(function(k) {
-        sliders[k].slider.setValue(p[k], true);
-      });
-    }
-  });
-
-  panel.add(ui.Label('Scenario preset', S.label));
-  panel.add(presetSelect);
-  panel.add(descLabel);
-  panel.add(ui.Label('Fine-tune below if needed:', {
-    fontSize:'10px',
-    color:'#aaa',
-    margin:'3px 0 1px'
-  }));
-
-  var factorDefs = [
-    {label:'Vegetation Dryness (VDI)', key:'w1'},
-    {label:'Land Surface Temp  (LST)', key:'w2'},
-    {label:'Precip. Deficit    (PA)',  key:'w3'},
-    {label:'Wind Speed         (WS)',  key:'w4'},
-    {label:'Terrain Slope   (SLOPE)',  key:'w5'},
-    {label:'Fire History      (HFD)',  key:'w6'}
-  ];
-
-  var sliders = {};
-  factorDefs.forEach(function(f) {
-    var vl = ui.Label('0.17', {fontSize:'10px', color:'#888'});
-    panel.add(ui.Panel(
-      [ui.Label(f.label, {fontSize:'10px', width:'165px'}), vl],
-      ui.Panel.Layout.flow('horizontal'),
-      {margin:'1px 0'}
-    ));
-
-    var sl = ui.Slider({
-      min:0,
-      max:1,
-      value:1/6,
-      step:0.05,
-      style:{width:'220px'},
-      onChange: function(v) {
-        vl.setValue(v.toFixed(2));
-        presetSelect.setValue('Custom (manual)', false);
-        descLabel.setValue(PRESETS['Custom (manual)'].desc);
-      }
-    });
-
-    sliders[f.key] = {slider: sl, label: vl};
-    panel.add(sl);
-  });
-
-  panel.add(ui.Label('──────────────────────────', S.div));
-  var statusLabel = ui.Label('', {fontSize:'11px', color:'#666'});
-
-  panel.add(ui.Button({
-    label:'▶  Run Analysis',
-    style:S.btn,
-    onClick: function() {
-      var layers = Map.drawingTools().layers();
-      if (layers.length() === 0) {
-        statusLabel.setValue('⚠ Please draw an AOI first.');
-        return;
-      }
-
-      statusLabel.setValue('⏳ Running — please wait…');
-      onRun(
-        layers.get(0).toGeometry(),
-        startBox.getValue(),
-        endBox.getValue(),
-        {
-          w1: sliders.w1.slider.getValue(),
-          w2: sliders.w2.slider.getValue(),
-          w3: sliders.w3.slider.getValue(),
-          w4: sliders.w4.slider.getValue(),
-          w5: sliders.w5.slider.getValue(),
-          w6: sliders.w6.slider.getValue()
-        },
-        statusLabel
-      );
-    }
-  }));
-
-  panel.add(statusLabel);
-
-  panel.add(ui.Label('──────────────────────────', S.div));
-  panel.add(ui.Label('Risk Breakdown', S.section));
-  var resultsPanel = ui.Panel({style:{margin:'0'}});
-  panel.add(resultsPanel);
-
-  panel.add(ui.Label('──────────────────────────', S.div));
-  panel.add(ui.Label(
-    'Data: MODIS · ERA5-Land · CHIRPS · SRTM · FIRMS\nCASA0025 · UCL CASA',
-    {fontSize:'9px', color:'#aaa'}
-  ));
-
-  return {panel:panel, resultsPanel:resultsPanel};
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-//  MAIN — wire everything together
-// ══════════════════════════════════════════════════════════════════════════════
-function runAnalysis(aoi, start, end, weights, statusLabel) {
-  showLoading('Running wildfire risk analysis...');
+function runAnalysis(aoi, start, end, weights) {
+  postStatus('loading', 'Running wildfire risk analysis…');
   var data = loadDatasets(aoi, start, end);
 
   var ndviComp = data.ndvi.map(applyModisCloudMask).median();
@@ -1423,177 +838,197 @@ function runAnalysis(aoi, start, end, weights, statusLabel) {
     }
   }
 
-  var addedLayers = addAnalysisLayers(wri, classified, aoi);
-
-  var fireLayers = getFireLayersFromMap();
-  buildBasemapSelector();
-  buildLayerControls(
-    addedLayers.wriLayer,
-    addedLayers.classLayer,
-    fireLayers.fire30Layer,
-    fireLayers.fire7Layer
-  );
-
-  showWRILegend();
+  addAnalysisLayers(wri, classified, aoi);
 
   var stats = computeZonalStats(wri, classified, normStack, weights, aoi);
   print('Zonal Stats:', stats);
-  buildRiskChart(stats, resultsPanel);
+  postStatsToParent(stats);
+
+  // 12-month FIRMS time-series for the outer chart (fire and forget)
+  computeFireTimeseries(aoi, end).evaluate(function(series, err) {
+    if (err || !series) return;
+    postToParent({
+      type: 'TIMESERIES',
+      points: series.map(function(pt) {
+        return {month: pt.month, count: Number(pt.count) || 0};
+      })
+    });
+  });
 
   initInspector(wri, normStack, classified, hfdRaw);
-  hideLoading();
-  statusLabel.setValue('✅ Done. Click any point on the map to inspect values.');
+  postStatus('done', 'Analysis complete. Click any point on the map to inspect.');
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  GLOBAL FIRE LAYER — displayed on startup, no AOI required
+//  GLOBAL FIRE LAYER — context layer shown on startup before AOI selection.
+//  Kept lightweight: single 30-day composite at low opacity. Can be toggled
+//  from the outer shell via TOGGLE_LAYER / SET_OPACITY if desired.
 // ══════════════════════════════════════════════════════════════════════════════
-function loadGlobalFireLayer(daysBack) {
-  daysBack = daysBack || 30;
-
-  var end30 = '2024-09-01';
+function loadGlobalFireLayer() {
+  var end30   = '2024-09-01';
   var start30 = '2024-08-02';
-  var start7 = '2024-08-25';
 
-  var firms30 = ee.ImageCollection('FIRMS')
+  var fireCount30 = ee.ImageCollection('FIRMS')
     .filterDate(start30, end30)
+    .select('T21')
+    .map(function(img) { return img.gt(0).rename('fire'); })
+    .sum()
+    .selfMask();
+
+  var fireVis30 = fireCount30.visualize({
+    min: 1, max: 15,
+    palette: ['#ff9900', '#ff5500', '#cc2200']
+  });
+
+  Map.addLayer(fireVis30, {}, 'Active Fires — 30 days', true, 0.55);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  EMBEDDED MODE — bridge between outer HTML dashboard and GEE App iframe
+//  All UI controls (sliders, presets, Run button, results) live in index.html.
+//  This script only renders the map + layers and communicates via postMessage.
+// ══════════════════════════════════════════════════════════════════════════════
+function postToParent(msg) {
+  try {
+    if (typeof window !== 'undefined' &&
+        window.parent && window.parent !== window) {
+      window.parent.postMessage(msg, '*');
+    }
+  } catch (err) { /* Code-Editor sandbox — safe no-op */ }
+}
+
+function postStatus(state, message) {
+  postToParent({type: 'STATUS', state: state, message: message || ''});
+}
+
+var aoiNotifyPending = false;
+function notifyAOIDrawn() {
+  if (aoiNotifyPending) return;
+  var layers = Map.drawingTools().layers();
+  if (layers.length() === 0) {
+    postToParent({type: 'AOI_CLEARED'});
+    return;
+  }
+  aoiNotifyPending = true;
+  var geom = layers.get(0).toGeometry();
+  geom.area(1).divide(1e6).evaluate(function(km2, err) {
+    aoiNotifyPending = false;
+    if (err || km2 == null) return;
+    geom.bounds().evaluate(function(bounds) {
+      postToParent({
+        type: 'AOI_DRAWN',
+        areaKm2: Number(km2) || 0,
+        bbox: (bounds && bounds.coordinates) ? bounds.coordinates : null
+      });
+    });
+  });
+}
+
+// Hook AOI drawing events
+Map.drawingTools().onDraw(notifyAOIDrawn);
+Map.drawingTools().onEdit(notifyAOIDrawn);
+Map.drawingTools().onErase(notifyAOIDrawn);
+
+// ── 12-month FIRMS time-series (for outer bottom chart) ─────────────────────
+function computeFireTimeseries(aoi, end) {
+  var endDate = ee.Date(end);
+  var startDate = endDate.advance(-12, 'month');
+
+  var firms = ee.ImageCollection('FIRMS')
+    .filterDate(startDate, endDate)
+    .filterBounds(aoi)
     .map(function(img) {
       return img.select('T21').gt(0).rename('fire')
         .copyProperties(img, ['system:time_start']);
     });
 
-  var fireCount30 = firms30.sum().selfMask();
-  var fireVis30 = fireCount30.visualize({
-    min: 1,
-    max: 15,
-    palette: ['#ff9900', '#ff5500', '#cc2200']
-  });
-
-  var firms7 = ee.ImageCollection('FIRMS')
-    .filterDate(start7, end30)
-    .map(function(img) {
-      return img.select('T21').gt(0).selfMask().rename('fire')
-        .copyProperties(img, ['system:time_start']);
+  var monthIndices = ee.List.sequence(0, 11);
+  return monthIndices.map(function(i) {
+    var m = startDate.advance(ee.Number(i), 'month');
+    var mEnd = m.advance(1, 'month');
+    var summed = firms.filterDate(m, mEnd).sum().reduceRegion({
+      reducer: ee.Reducer.sum(),
+      geometry: aoi,
+      scale: 2000,
+      maxPixels: 1e9,
+      bestEffort: true
     });
-
-  var fireCount7 = firms7.sum().selfMask();
-  var fireVis7 = fireCount7.visualize({
-    min: 1,
-    max: 5,
-    palette: ['#ffcc00', '#ff4400', '#cc0000']
-  });
-
-  Map.addLayer(fireVis30, {}, 'Active Fires — 30 days', true, 0.65);
-  Map.addLayer(fireVis7, {}, 'Active Fires — 7 days (latest)', true, 0.9);
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-//  LEGENDS — created once, never duplicated
-// ══════════════════════════════════════════════════════════════════════════════
-var fireLegend = ui.Panel({
-  style: {
-    position:'bottom-left',
-    padding:'10px',
-    backgroundColor:'rgba(255,255,255,0.88)',
-    width:'250px'
-  }
-});
-
-fireLegend.add(ui.Label('Global Fire Activity', {
-  fontSize:'12px',
-  fontWeight:'bold',
-  margin:'0 0 5px'
-}));
-
-[
-  {color:'#cc0000', text:'Very high activity (7d)'},
-  {color:'#ff4400', text:'High activity (7d)'},
-  {color:'#ffcc00', text:'Recent fire (7d)'},
-  {color:'#ff9900', text:'Historical fire (30d)'}
-].forEach(function(r) {
-fireLegend.add(ui.Panel([
-  ui.Label('■', {color:r.color, fontSize:'14px', margin:'0 6px 0 0'}),
-  ui.Label(r.text, {
-    fontSize:'11px',
-    color:'#444',
-    width:'190px'
-  })
-], ui.Panel.Layout.flow('horizontal'), {margin:'2px 0'}));
-});
-
-fireLegend.add(ui.Label('Source: NASA FIRMS / MODIS', {
-  fontSize:'9px',
-  color:'#aaa',
-  margin:'5px 0 0'
-}));
-
-Map.add(fireLegend);
-
-var wriLegend = ui.Panel({
-  style: {
-    position:'top-right',
-    padding:'12px',
-    backgroundColor:'rgba(255,255,255,0.95)',
-    width:'300px',
-    margin:'350px 0 0 0'
-  }
-});
-
-Map.add(wriLegend);
-
-function showWRILegend() {
-  wriLegend.clear();
-
-  wriLegend.add(ui.Label('Wildfire Risk Index (WRI)', {
-    fontSize:'12px',
-    fontWeight:'bold',
-    margin:'0 0 5px'
-  }));
-
-  var colorBar = ui.Panel([
-    ui.Label('', {backgroundColor:'#1a9641', padding:'8px', margin:'0', stretch:'horizontal'}),
-    ui.Label('', {backgroundColor:'#a6d96a', padding:'8px', margin:'0', stretch:'horizontal'}),
-    ui.Label('', {backgroundColor:'#ffffbf', padding:'8px', margin:'0', stretch:'horizontal'}),
-    ui.Label('', {backgroundColor:'#fdae61', padding:'8px', margin:'0', stretch:'horizontal'}),
-    ui.Label('', {backgroundColor:'#d7191c', padding:'8px', margin:'0', stretch:'horizontal'})
-  ], ui.Panel.Layout.flow('horizontal'), {
-    stretch:'horizontal',
-    margin:'2px 0 3px 0'
-  });
-  wriLegend.add(colorBar);
-
-  var tickPanel = ui.Panel([
-    ui.Label('0.0', {fontSize:'10px', color:'#1a9641', textAlign:'left'}),
-    ui.Label('0.33', {fontSize:'10px', color:'#aaa', textAlign:'center', stretch:'horizontal'}),
-    ui.Label('0.67', {fontSize:'10px', color:'#aaa', textAlign:'center', stretch:'horizontal'}),
-    ui.Label('1.0', {fontSize:'10px', color:'#d7191c', textAlign:'right'})
-  ], ui.Panel.Layout.flow('horizontal'), {stretch:'horizontal'});
-  wriLegend.add(tickPanel);
-
-  wriLegend.add(ui.Panel([
-    ui.Label('──────────────────────────────', {
-      color:'#ddd',
-      margin:'4px 0 3px',
-      stretch:'horizontal'
-    })
-  ], ui.Panel.Layout.flow('horizontal')));
-
-  [
-    {color:'#1a9641', label:'Low  (WRI < 0.33)'},
-    {color:'#fdae61', label:'Medium  (0.33 – 0.67)'},
-    {color:'#d7191c', label:'High  (WRI ≥ 0.67)'}
-  ].forEach(function(r) {
-    wriLegend.add(ui.Panel([
-      ui.Label('■', {color:r.color, fontSize:'14px', margin:'0 5px 0 0'}),
-      ui.Label(r.label, {fontSize:'11px', color:'#333'})
-    ], ui.Panel.Layout.flow('horizontal'), {margin:'1px 0'}));
+    return ee.Dictionary({
+      month: m.format('YYYY-MM'),
+      count: ee.Number(summed.get('fire', 0))
+    });
   });
 }
 
-// ── Build UI and launch ──────────────────────────────────────────────────────
-var uiResult = buildControlPanel(runAnalysis);
-var resultsPanel = uiResult.resultsPanel;
-ui.root.insert(0, uiResult.panel);
+// ── Inbound commands from outer dashboard ───────────────────────────────────
+var lastDrawnAOI = null;
+try {
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    window.addEventListener('message', function(e) {
+      var d = e && e.data;
+      if (!d || !d.type) return;
 
-// Display global fire layer immediately on load
-loadGlobalFireLayer(30);
+      if (d.type === 'RUN') {
+        var layers = Map.drawingTools().layers();
+        if (layers.length() === 0) {
+          postStatus('error', 'Please draw an AOI on the map first.');
+          return;
+        }
+        var aoi = layers.get(0).toGeometry();
+        lastDrawnAOI = aoi;
+        runAnalysis(aoi, d.start, d.end, d.weights);
+      } else if (d.type === 'CLEAR_AOI') {
+        Map.drawingTools().layers().reset();
+        postToParent({type: 'AOI_CLEARED'});
+      } else if (d.type === 'DRAW_START') {
+        // Replace any previous AOI and arm the drawing tool for a new shape.
+        // setShape() alone puts the drawing tools into draw mode — ".draw()"
+        // is not part of the public API and was causing the tool to fail
+        // silently when the native toolbar is hidden.
+        Map.drawingTools().layers().reset();
+        var shape = (d.shape === 'polygon') ? 'polygon' : 'rectangle';
+        Map.drawingTools().setShape(shape);
+      } else if (d.type === 'DRAW_STOP') {
+        Map.drawingTools().setShape(null);
+      } else if (d.type === 'TOGGLE_LAYER') {
+        // Special pseudo-layer: the drawn AOI polygon lives in the drawing
+        // tools, not Map.layers(). Toggle every drawn geometry layer.
+        if (d.layerName === '__AOI__') {
+          var aoiLayers = Map.drawingTools().layers();
+          for (var a = 0; a < aoiLayers.length(); a++) {
+            aoiLayers.get(a).setShown(!!d.visible);
+          }
+          return;
+        }
+        var lyrs = Map.layers();
+        for (var i = 0; i < lyrs.length(); i++) {
+          if (lyrs.get(i).getName() === d.layerName) {
+            lyrs.get(i).setShown(!!d.visible);
+            break;
+          }
+        }
+      } else if (d.type === 'SET_OPACITY') {
+        var lyrs2 = Map.layers();
+        for (var j = 0; j < lyrs2.length(); j++) {
+          if (lyrs2.get(j).getName() === d.layerName) {
+            lyrs2.get(j).setOpacity(Number(d.opacity) || 0);
+            break;
+          }
+        }
+      } else if (d.type === 'SET_BASEMAP') {
+        var bm = d.basemap || 'DARK';
+        // Always pass the styles dict so DARK remains registered even if the
+        // user switched to a built-in basemap in the meantime.
+        Map.setOptions(bm, EMBER_MAP_STYLES);
+      } else if (d.type === 'ZOOM') {
+        var zCur = Map.getZoom() || 3;
+        var delta = Number(d.delta) || 0;
+        Map.setZoom(Math.max(1, Math.min(20, zCur + delta)));
+      }
+    });
+  }
+} catch (err) { /* no-op in Code Editor */ }
+
+// ── Startup ──────────────────────────────────────────────────────────────────
+loadGlobalFireLayer();
+postStatus('ready', 'EMBER ready. Draw an AOI on the map.');

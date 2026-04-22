@@ -4,6 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>EMBER — Earth Monitoring of Burn Exposure Risk</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet" />
   <style>
     /* ── Reset & Base ─────────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -12,14 +16,16 @@
       --bg:        #080b10;
       --panel:     rgba(10, 14, 22, 0.85);
       --border:    rgba(255, 80, 30, 0.18);
+      --border-2:  rgba(255, 80, 30, 0.35);
       --red:       #ff3c1f;
       --orange:    #ff7c3a;
       --amber:     #ffb347;
       --cyan:      #00d4ff;
       --cyan-dim:  rgba(0, 212, 255, 0.15);
-      --text:      #d8dde8;
-      --text-dim:  #6a7385;
-      --font:      'Segoe UI', system-ui, sans-serif;
+      --green:     #4adc8a;
+      --text:      #f2f5fc;
+      --text-dim:  #9aa3b6;
+      --font:      'Outfit', 'Segoe UI', system-ui, sans-serif;
     }
 
     html, body {
@@ -27,15 +33,18 @@
       background: var(--bg);
       color: var(--text);
       font-family: var(--font);
-      font-size: 13px;
+      font-size: 14.5px;
+      font-weight: 500;
       overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }
 
     /* ── Layout Grid ──────────────────────────────────────────────────── */
     .shell {
       display: grid;
-      grid-template-columns: 200px 1fr 260px;
-      grid-template-rows: 48px 1fr 110px;
+      grid-template-columns: 260px 1fr 300px;
+      grid-template-rows: 48px 1fr 150px;
       height: 100vh;
       gap: 0;
     }
@@ -51,145 +60,646 @@
       gap: 16px;
       z-index: 10;
     }
-
-    .topbar img.logo { height: 26px; filter: drop-shadow(0 0 6px var(--red)); }
-
-    .topbar .divider {
-      width: 1px; height: 20px;
-      background: var(--border);
+    .topbar img.logo {
+      height: 80px; width: auto;
+      filter: drop-shadow(0 0 8px rgba(255, 60, 31, 0.55));
     }
-
+    .topbar .divider { width: 1px; height: 20px; background: var(--border); }
     .topbar .title {
-      font-size: 13px;
-      font-weight: 600;
-      letter-spacing: 0.08em;
-      color: var(--text);
-      text-transform: uppercase;
+      font-size: 14px; font-weight: 700; letter-spacing: 0.08em;
+      color: #fff; text-transform: uppercase;
     }
+    .topbar .subtitle { font-size: 12px; color: var(--text-dim); font-weight: 500;
+                        margin-left: auto; }
 
-    .topbar .subtitle {
-      font-size: 11px;
-      color: var(--text-dim);
-      margin-left: auto;
+    /* Status indicator in top bar */
+    .status-wrap {
+      display: flex; align-items: center; gap: 8px;
+      padding: 4px 10px; border-radius: 12px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
     }
-
     .status-dot {
-      width: 7px; height: 7px;
-      border-radius: 50%;
-      background: var(--red);
-      box-shadow: 0 0 8px var(--red);
-      animation: pulse 2s ease-in-out infinite;
-      margin-left: 8px;
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--text-dim);
+      box-shadow: 0 0 6px var(--text-dim);
     }
-    .status-label { font-size: 11px; color: var(--red); letter-spacing: 0.05em; }
+    .status-dot.ready   { background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .status-dot.loading { background: var(--amber); box-shadow: 0 0 8px var(--amber);
+                          animation: pulse 1.2s ease-in-out infinite; }
+    .status-dot.done    { background: var(--cyan);  box-shadow: 0 0 8px var(--cyan); }
+    .status-dot.error   { background: var(--red);   box-shadow: 0 0 8px var(--red); }
+    .status-msg { font-size: 12px; color: var(--text); font-weight: 500;
+                  max-width: 520px;
+                  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
     @keyframes pulse {
       0%, 100% { opacity: 1; }
-      50%       { opacity: 0.3; }
+      50%      { opacity: 0.35; }
     }
 
-    /* ── Left Panel — Legend ──────────────────────────────────────────── */
+    /* Top-bar "?" button that replays the guided tour */
+    .tour-open-btn {
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      background: transparent;
+      border: 1px solid var(--border-2);
+      color: var(--text-dim);
+      font-family: var(--font);
+      font-size: 11px; font-weight: 700;
+      line-height: 1;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .tour-open-btn:hover {
+      background: rgba(255, 60, 31, 0.16);
+      border-color: var(--red);
+      color: #fff;
+      box-shadow: 0 0 8px rgba(255, 60, 31, 0.4);
+    }
+
+    /* ── Guided Tour ────────────────────────────────────────────────── */
+    /* `position: fixed` is critical: the tour markup lives inside `.shell`
+       (a CSS grid), so without it the overlay would become a grid item and
+       shove all the panels one column to the right. */
+    .tour-root {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9997;
+      visibility: hidden;
+    }
+    .tour-root.active { visibility: visible; }
+    /* Only the tooltip needs to receive clicks (Back / Next / Skip).
+       The spotlight stays pointer-events:none so users can still
+       interact with the element underneath if they want. */
+    .tour-root.active .tour-tooltip { pointer-events: auto; }
+
+    /* Spotlight: transparent target-sized box; huge outer shadow dims
+       everything outside it. pointer-events:none lets the user still
+       interact with the page underneath if they want. */
+    .tour-spotlight {
+      position: fixed;
+      left: 0; top: 0; width: 0; height: 0;
+      box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.78);
+      border: 2px solid var(--red);
+      border-radius: 6px;
+      z-index: 9998;
+      pointer-events: none;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      animation: tour-pulse 2s ease-in-out infinite;
+    }
+    @keyframes tour-pulse {
+      0%, 100% { box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.78),
+                             0 0 0 2px rgba(255, 60, 31, 0.2); }
+      50%      { box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.78),
+                             0 0 0 6px rgba(255, 60, 31, 0.35); }
+    }
+
+    /* Tooltip card floating next to the spotlight */
+    .tour-tooltip {
+      position: fixed;
+      width: 340px;
+      padding: 16px 18px 14px;
+      background: linear-gradient(180deg,
+                  rgba(14, 20, 30, 0.98) 0%,
+                  rgba(8, 11, 18, 0.98) 100%);
+      border: 1px solid var(--red);
+      border-radius: 8px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7),
+                  0 0 20px rgba(255, 60, 31, 0.3);
+      backdrop-filter: blur(12px);
+      z-index: 9999;
+      color: var(--text);
+      font-family: var(--font);
+      transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                  top  0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .tour-tooltip.tour-center {
+      width: 420px;
+      border-color: var(--border-2);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8),
+                  0 0 40px rgba(255, 60, 31, 0.2);
+    }
+    .tour-tip-head {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .tour-count {
+      font-size: 10px; font-weight: 700; letter-spacing: 0.12em;
+      color: var(--red);
+      text-transform: uppercase;
+      font-variant-numeric: tabular-nums;
+    }
+    .tour-skip {
+      background: transparent;
+      border: none;
+      color: var(--text-dim);
+      font-family: var(--font);
+      font-size: 10px; font-weight: 500;
+      letter-spacing: 0.05em;
+      cursor: pointer;
+      padding: 2px 4px;
+      transition: color 0.15s;
+    }
+    .tour-skip:hover { color: #fff; }
+    .tour-title {
+      font-size: 15px; font-weight: 700;
+      color: #fff;
+      margin-bottom: 6px;
+      letter-spacing: 0.01em;
+    }
+    .tour-body {
+      font-size: 12px; line-height: 1.55;
+      color: var(--text-dim);
+      margin-bottom: 14px;
+    }
+    .tour-actions {
+      display: flex; justify-content: flex-end; gap: 8px;
+    }
+    .tour-btn {
+      padding: 6px 14px;
+      font-family: var(--font);
+      font-size: 11px; font-weight: 600;
+      letter-spacing: 0.04em;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .tour-btn-ghost {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+    }
+    .tour-btn-ghost:hover:not(:disabled) {
+      border-color: var(--border-2);
+      color: var(--text);
+    }
+    .tour-btn-ghost:disabled {
+      opacity: 0.35; cursor: not-allowed;
+    }
+    .tour-btn-cta {
+      background: var(--red);
+      border: 1px solid var(--red);
+      color: #fff;
+      box-shadow: 0 0 12px rgba(255, 60, 31, 0.45);
+    }
+    .tour-btn-cta:hover {
+      background: #ff5438;
+      box-shadow: 0 0 16px rgba(255, 60, 31, 0.6);
+    }
+
+    /* ── Left Panel — Controls ────────────────────────────────────────── */
     .panel-left {
       background: var(--panel);
       border-right: 1px solid var(--border);
-      padding: 18px 14px;
+      padding: 10px 12px 12px;
       display: flex;
       flex-direction: column;
-      gap: 20px;
-      overflow-y: auto;
+      gap: 9px;
+      overflow: hidden;
+      min-height: 0;
       backdrop-filter: blur(8px);
     }
 
-    .datetime { line-height: 1.6; }
-    .datetime .day  { font-size: 11px; color: var(--text-dim); }
-    .datetime .meta { font-size: 12px; color: var(--text); display: flex; align-items: center; gap: 6px; margin-top: 6px; }
-    .datetime .meta span { color: var(--cyan); }
+    .ctl-section h4 {
+      font-size: 11px; font-weight: 700; letter-spacing: 0.1em;
+      color: var(--text); text-transform: uppercase;
+      margin-bottom: 6px; padding-bottom: 4px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 6px;
+    }
 
-    .legend-section h4 {
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.06em;
+    /* Help chip — small ⓘ next to a heading. Hover / focus reveals a
+       dark popover listing factor abbreviations + full names. */
+    .help-chip {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 14px; height: 14px;
+      border: 1px solid var(--border-2);
+      border-radius: 50%;
       color: var(--text-dim);
+      font-size: 9px; font-weight: 700;
+      letter-spacing: 0;
+      cursor: help;
+      outline: none;
+      transition: all 0.15s;
+    }
+    .help-chip:hover, .help-chip:focus {
+      color: #fff;
+      border-color: var(--red);
+      background: rgba(255, 60, 31, 0.15);
+      box-shadow: 0 0 6px rgba(255, 60, 31, 0.35);
+    }
+    /* Popover uses `position: fixed` so it escapes the left panel's
+       `overflow: hidden` clip. JS sets top/left at hover time. */
+    .help-pop {
+      position: fixed;
+      top: 0; left: 0;
+      z-index: 10000;
+      width: 260px;
+      padding: 10px 12px;
+      background: rgba(8, 11, 18, 0.97);
+      border: 1px solid var(--border-2);
+      border-radius: 6px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+      backdrop-filter: blur(10px);
+      opacity: 0;
+      visibility: hidden;
+      transform: translateX(-4px);
+      transition: opacity 0.15s, transform 0.15s, visibility 0s linear 0.15s;
+      text-transform: none;
+      letter-spacing: 0;
+      pointer-events: none;
+    }
+    .help-pop.show {
+      opacity: 1;
+      visibility: visible;
+      transform: translateX(0);
+      transition: opacity 0.15s, transform 0.15s, visibility 0s;
+      pointer-events: auto;
+    }
+    .help-pop .help-title {
+      font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
       text-transform: uppercase;
-      margin-bottom: 10px;
+      color: var(--red);
+      margin-bottom: 7px;
       padding-bottom: 5px;
       border-bottom: 1px solid var(--border);
     }
+    .help-pop .help-item {
+      display: grid;
+      grid-template-columns: 44px 1fr;
+      gap: 8px;
+      font-size: 11px;
+      line-height: 1.4;
+      padding: 3px 0;
+    }
+    .help-pop .help-item b {
+      color: var(--cyan);
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .help-pop .help-item span {
+      color: var(--text-dim);
+      font-weight: 400;
+    }
 
-    .legend-item {
+    .row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .row label { font-size: 12px; color: var(--text); font-weight: 500;
+                 width: 42px; flex-shrink: 0; }
+
+    input[type="date"], select {
+      flex: 1; min-width: 0;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 13px;
+      font-weight: 500;
+      padding: 6px 7px;
+      border-radius: 3px;
+      outline: none;
+    }
+    input[type="date"]:focus, select:focus { border-color: var(--border-2); }
+    input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.85); cursor: pointer; }
+
+    /* Custom-styled dropdown — replaces OS default arrow + dark option list */
+    select {
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      appearance: none;
+      padding-right: 26px;
+      background-image:
+        linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+        linear-gradient(-45deg, transparent 50%, var(--text-dim) 50%);
+      background-position:
+        calc(100% - 14px) 50%,
+        calc(100% - 9px)  50%;
+      background-size: 5px 5px, 5px 5px;
+      background-repeat: no-repeat;
+    }
+    select:hover { background-color: rgba(255,255,255,0.08); }
+    select option {
+      background-color: #0f141c;
+      color: var(--text);
+      font-weight: 500;
+      padding: 6px 8px;
+    }
+    select option:checked,
+    select option:hover {
+      background: linear-gradient(0deg, rgba(255,60,31,0.35), rgba(255,60,31,0.35)) #0f141c;
+      color: #fff;
+    }
+
+    /* Weight sliders */
+    .slider-row {
+      display: grid;
+      grid-template-columns: 52px 1fr 36px;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 3px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .slider-row .sname {
+      color: var(--text); font-weight: 600;
+      cursor: help;
+      border-bottom: 1px dotted rgba(255,255,255,0.25);
+    }
+    .slider-row:hover .sname {
+      color: var(--cyan);
+      border-bottom-color: var(--cyan-dim);
+    }
+    .slider-row .sval  { color: var(--cyan); text-align: right;
+                         font-variant-numeric: tabular-nums; font-weight: 600; }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 4px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 2px;
+      outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      background: var(--red);
+      box-shadow: 0 0 4px var(--red);
+      cursor: pointer;
+      border: none;
+    }
+    input[type="range"]::-moz-range-thumb {
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      background: var(--red);
+      box-shadow: 0 0 4px var(--red);
+      cursor: pointer;
+      border: none;
+    }
+
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 7px 10px;
+      margin-top: 4px;
+      background: linear-gradient(180deg, rgba(255,60,31,0.25), rgba(255,60,31,0.1));
+      border: 1px solid var(--border-2);
+      color: #fff;
+      font-family: var(--font);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      cursor: pointer;
+      border-radius: 3px;
+      transition: all 0.15s;
+    }
+    .btn:hover { background: linear-gradient(180deg, rgba(255,60,31,0.4), rgba(255,60,31,0.2));
+                 box-shadow: 0 0 12px rgba(255,60,31,0.3); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
+    .btn.secondary {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-weight: 600;
+    }
+    .btn.secondary:hover { background: rgba(255,255,255,0.08); color: #fff; }
+
+    .aoi-status {
+      font-size: 11px; color: var(--text-dim); font-weight: 500;
+      padding: 6px 8px;
+      border: 1px dashed var(--border);
+      border-radius: 3px;
+      margin-top: 2px;
+      line-height: 1.35;
+    }
+    .aoi-status.active { color: var(--cyan); border-color: var(--cyan-dim); font-weight: 600; }
+
+    /* Custom AOI draw toolbar — replaces GEE's native white drawing buttons */
+    .draw-tools {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
+    .draw-btn {
       display: flex;
       align-items: center;
-      gap: 8px;
-      margin-bottom: 7px;
-      font-size: 12px;
+      justify-content: center;
+      gap: 5px;
+      padding: 5px 6px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
       color: var(--text);
+      font-family: var(--font);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+      border-radius: 3px;
+      transition: all 0.15s;
     }
+    .draw-btn:hover {
+      background: rgba(255,60,31,0.10);
+      border-color: var(--border-2);
+      color: #fff;
+    }
+    .draw-btn.active {
+      background: linear-gradient(180deg, rgba(255,60,31,0.3), rgba(255,60,31,0.15));
+      border-color: var(--border-2);
+      color: #fff;
+      box-shadow: 0 0 8px rgba(255,60,31,0.3);
+    }
+    .draw-btn svg { width: 13px; height: 13px; flex-shrink: 0; }
 
-    .swatch {
-      width: 12px; height: 12px;
+    /* ── Layer controls (toggle + opacity per map layer) ─────────────── */
+    .lyr-row {
+      display: grid;
+      grid-template-columns: 1fr 60px 30px;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 4px;
+      font-size: 11px;
+    }
+    .lyr-check {
+      display: flex; align-items: center; gap: 6px;
+      cursor: pointer; user-select: none;
+      min-width: 0;
+    }
+    .lyr-check input[type="checkbox"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 13px; height: 13px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border-2);
       border-radius: 2px;
+      cursor: pointer;
+      position: relative;
       flex-shrink: 0;
+      transition: all 0.15s;
     }
-    .swatch.shrub      { background: #4a7c59; }
-    .swatch.woodland   { background: #2d5a3d; }
-    .swatch.water      { background: #1a5a8a; }
-    .swatch.contour    { background: #4a4a5a; }
-    .swatch.road       { background: #6a5a3a; }
-    .swatch.residential{ background: #ff6b35; border-radius: 50%; }
-    .swatch.spread     { background: #cc2200; border-radius: 50%; }
-    .swatch.barrier    { background: #555; border-radius: 2px; border: 1px solid #888; }
-    .swatch.fire       { background: var(--red); border-radius: 50%;
-                         box-shadow: 0 0 6px var(--red); }
+    .lyr-check input[type="checkbox"]:checked {
+      background: var(--red);
+      border-color: var(--red);
+      box-shadow: 0 0 4px rgba(255,60,31,0.5);
+    }
+    .lyr-check input[type="checkbox"]:checked::after {
+      content: '';
+      position: absolute;
+      left: 3px; top: 0px;
+      width: 4px; height: 7px;
+      border: solid #fff;
+      border-width: 0 1.5px 1.5px 0;
+      transform: rotate(45deg);
+    }
+    .lyr-check .lyr-name {
+      color: var(--text); font-weight: 500;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .lyr-check .lyr-name.dim { color: var(--text-dim); }
+    .lyr-row input[type="range"] { height: 3px; }
+    .lyr-pct {
+      font-size: 10px; color: var(--text-dim);
+      text-align: right; font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
 
-    .swatch.wind-icon, .swatch.precip-icon {
+    /* Toggle-only variant (no opacity slider) — used for the AOI polygon */
+    .lyr-row--toggle { grid-template-columns: 1fr auto; gap: 6px; }
+    .lyr-badge {
+      font-size: 9px; color: var(--cyan); font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.08em;
+      padding: 2px 6px;
+      border: 1px solid var(--cyan-dim);
+      border-radius: 2px;
+      background: rgba(0, 212, 255, 0.08);
+    }
+    .lyr-badge.empty {
+      color: var(--text-dim);
+      border-color: var(--border);
       background: transparent;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 13px;
     }
 
-    /* Risk scale */
+    /* Risk Classes legend */
+    .class-legend { display: flex; flex-direction: column; gap: 4px; }
+    .class-row {
+      display: grid;
+      grid-template-columns: 11px 46px 1fr;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+    }
+    .class-swatch {
+      width: 10px; height: 10px;
+      border-radius: 2px;
+      box-shadow: 0 0 4px rgba(0,0,0,0.4);
+    }
+    .class-name { color: var(--text); font-weight: 600; }
+    .class-range {
+      color: var(--text-dim); font-weight: 500;
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+
+    /* ── Floating dark zoom buttons (replaces GEE native zoom) ───────── */
+    .map-zoom {
+      position: absolute;
+      left: 12px; top: 12px;
+      z-index: 3;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .zoom-btn {
+      width: 30px; height: 30px;
+      background: rgba(10, 14, 22, 0.88);
+      backdrop-filter: blur(6px);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 18px; font-weight: 400;
+      line-height: 1;
+      cursor: pointer;
+      border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.15s;
+    }
+    .zoom-btn:hover {
+      background: rgba(255,60,31,0.18);
+      border-color: var(--border-2);
+      color: #fff;
+      box-shadow: 0 0 8px rgba(255,60,31,0.3);
+    }
+    .zoom-btn:active { transform: scale(0.95); }
+
+    /* WRI scale legend (kept small at bottom) */
     .risk-scale {
       width: 100%;
-      height: 8px;
-      border-radius: 4px;
-      background: linear-gradient(to right, #1a9641, #a6d96a, #ffffbf, #fdae61, #d7191c);
-      margin: 6px 0 3px;
+      height: 6px;
+      border-radius: 3px;
+      background: linear-gradient(to right, #2ecc71, #f1c40f, #e67e22, #e74c3c);
+      margin: 4px 0 2px;
+      box-shadow: 0 0 6px rgba(0,0,0,0.4);
+    }
+    .risk-scale-ticks {
+      display: flex; justify-content: space-between;
+      font-size: 9px;
+      font-weight: 500;
+      color: var(--text-dim);
+      font-variant-numeric: tabular-nums;
+      margin: 0 0 7px;
     }
     .risk-labels {
-      display: flex;
-      justify-content: space-between;
-      font-size: 10px;
+      display: flex; justify-content: space-between;
+      font-size: 10px; color: var(--text-dim); font-weight: 500;
+    }
+    .data-note {
+      margin-top: 8px;
+      padding-top: 7px;
+      border-top: 1px solid var(--border);
+      font-size: 9px;
+      line-height: 1.45;
       color: var(--text-dim);
+      letter-spacing: 0.02em;
     }
 
     /* ── Main — GEE iframe ────────────────────────────────────────────── */
+    /* We crop two bits of GEE / Google Maps chrome by pushing the iframe
+       outward and clipping with the parent's overflow:hidden.
+         • Top (82px) — GEE Apps title bar + search box.
+         • Bottom (26px) — Google Maps "keyboard shortcuts" button + scale bar
+           + attribution. (Attribution reappears on hover since Google keeps
+           it in the tooltip, satisfying basic ToS disclosure.) */
+    :root {
+      --gee-chrome:        82px;
+      --gee-chrome-bottom: 26px;
+    }
     .panel-main {
       position: relative;
-      background: #060910;
+      background: #0f141c;             /* matches the DARK basemap land colour */
       overflow: hidden;
     }
-
     .panel-main iframe {
+      position: absolute;
+      left: 0;
+      top: calc(var(--gee-chrome) * -1);
       width: 100%;
-      height: 100%;
+      height: calc(100% + var(--gee-chrome) + var(--gee-chrome-bottom));
       border: none;
       display: block;
+      background: #0f141c;             /* avoid flashing white while loading */
     }
 
-    /* placeholder shown before GEE app is deployed */
     .gee-placeholder {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 14px;
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 14px;
       background: radial-gradient(ellipse at 50% 60%, rgba(180, 30, 0, 0.12) 0%, transparent 70%),
                   radial-gradient(ellipse at 30% 70%, rgba(0, 80, 140, 0.08) 0%, transparent 60%),
                   #060910;
     }
-
     .gee-placeholder .ember-glow {
       width: 80px; height: 80px;
       border-radius: 50%;
@@ -197,38 +707,20 @@
       box-shadow: 0 0 40px 10px rgba(255, 80, 0, 0.4), 0 0 80px 20px rgba(200, 30, 0, 0.2);
       animation: flicker 3s ease-in-out infinite;
     }
-
     @keyframes flicker {
-      0%, 100% { transform: scale(1);     opacity: 1; }
-      33%       { transform: scale(1.05); opacity: 0.9; }
-      66%       { transform: scale(0.97); opacity: 0.95; }
+      0%, 100% { transform: scale(1); opacity: 1; }
+      33%      { transform: scale(1.05); opacity: 0.9; }
+      66%      { transform: scale(0.97); opacity: 0.95; }
     }
+    .gee-placeholder p { font-size: 13px; color: var(--text-dim); letter-spacing: 0.05em; }
 
-    .gee-placeholder p {
-      font-size: 13px;
-      color: var(--text-dim);
-      letter-spacing: 0.05em;
-    }
-
-    .gee-placeholder .deploy-note {
-      font-size: 11px;
-      color: rgba(0, 212, 255, 0.5);
-      border: 1px solid rgba(0, 212, 255, 0.2);
-      padding: 6px 14px;
-      border-radius: 4px;
-    }
-
-    /* scan-line overlay */
-    .panel-main::after {
-      content: '';
-      position: absolute;
-      inset: 0;
+    /* Scan-line overlay kept, but on a separate element so it doesn't block iframe clicks */
+    .scanlines {
+      position: absolute; inset: 0;
       background: repeating-linear-gradient(
         to bottom,
-        transparent 0px,
-        transparent 3px,
-        rgba(0,0,0,0.04) 3px,
-        rgba(0,0,0,0.04) 4px
+        transparent 0px, transparent 3px,
+        rgba(0,0,0,0.04) 3px, rgba(0,0,0,0.04) 4px
       );
       pointer-events: none;
       z-index: 2;
@@ -238,225 +730,227 @@
     .panel-right {
       background: var(--panel);
       border-left: 1px solid var(--border);
-      padding: 18px 14px;
+      padding: 10px 12px 12px;
       display: flex;
       flex-direction: column;
-      gap: 16px;
-      overflow-y: auto;
+      gap: 9px;
+      overflow: hidden;
+      min-height: 0;
       backdrop-filter: blur(8px);
     }
 
     .section-title {
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.08em;
-      color: var(--text-dim);
-      text-transform: uppercase;
-      padding-bottom: 6px;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.1em;
+      color: var(--text); text-transform: uppercase;
+      padding-bottom: 4px;
+      margin-bottom: 8px;
       border-bottom: 1px solid var(--border);
+    }
+
+    /* When data-tour wrappers group a title + its content inside the
+       right panel, keep the same internal spacing via flex + gap. */
+    .panel-right [data-tour] {
+      display: flex;
+      flex-direction: column;
     }
 
     /* Key metrics */
     .metrics {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 10px;
+      gap: 6px;
     }
-
     .metric {
-      background: rgba(255, 60, 31, 0.05);
-      border: 1px solid rgba(255, 60, 31, 0.12);
-      border-radius: 6px;
-      padding: 10px;
+      background: rgba(255, 60, 31, 0.06);
+      border: 1px solid rgba(255, 60, 31, 0.15);
+      border-radius: 4px;
+      padding: 6px 8px;
     }
-
-    .metric .label {
-      font-size: 10px;
-      color: var(--text-dim);
-      margin-bottom: 4px;
-    }
-
-    .metric .value {
-      font-size: 22px;
-      font-weight: 700;
-      color: #fff;
-      line-height: 1;
-    }
-
+    .metric .label { font-size: 10px; color: var(--text-dim); margin-bottom: 2px;
+                     text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+    .metric .value { font-size: 18px; font-weight: 700; color: #fff; line-height: 1;
+                     font-variant-numeric: tabular-nums; }
     .metric .value.red    { color: var(--red); }
     .metric .value.cyan   { color: var(--cyan); }
     .metric .value.orange { color: var(--orange); }
+    .metric .value.amber  { color: var(--amber); }
+    .metric .unit { font-size: 10px; color: var(--text-dim); margin-top: 2px; font-weight: 500; }
 
-    .metric .trend {
-      font-size: 10px;
-      margin-top: 4px;
-    }
-    .metric .trend.up   { color: var(--red); }
-    .metric .trend.down { color: #4adc8a; }
-
-    /* Mini map placeholder */
-    .minimap {
-      width: 100%;
-      aspect-ratio: 16/10;
-      border-radius: 6px;
-      border: 1px solid var(--border);
-      background:
-        radial-gradient(ellipse at 55% 50%, rgba(255, 50, 0, 0.35) 0%, transparent 45%),
-        radial-gradient(ellipse at 35% 60%, rgba(255, 100, 0, 0.15) 0%, transparent 35%),
-        repeating-linear-gradient(0deg, transparent, transparent 18px, rgba(0,212,255,0.04) 18px, rgba(0,212,255,0.04) 19px),
-        repeating-linear-gradient(90deg, transparent, transparent 18px, rgba(0,212,255,0.04) 18px, rgba(0,212,255,0.04) 19px),
-        #071020;
-      position: relative;
-      overflow: hidden;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .minimap-label {
-      font-size: 10px;
-      color: rgba(0, 212, 255, 0.4);
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-    }
-
-    .minimap-dot {
-      position: absolute;
-      width: 10px; height: 10px;
-      border-radius: 50%;
-      background: var(--red);
-      box-shadow: 0 0 12px 4px rgba(255, 60, 31, 0.6);
-      top: 48%; left: 55%;
-      animation: pulse 1.5s ease-in-out infinite;
-    }
-
-    /* Climate row */
-    .climate-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-    }
-
-    .climate-item .clabel {
-      font-size: 10px;
-      color: var(--text-dim);
-    }
-
-    .climate-item .cval {
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--cyan);
-      margin-top: 2px;
-    }
-
-    /* WRI bar */
-    .wri-bar-wrap {
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-    }
-
+    /* WRI / contribution bars */
     .wri-row {
-      display: flex;
+      display: grid;
+      grid-template-columns: 54px 1fr 42px;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
+      margin-bottom: 3px;
     }
-
-    .wri-row .wri-label {
-      font-size: 11px;
-      color: var(--text-dim);
-      width: 50px;
-      flex-shrink: 0;
-    }
-
+    .wri-row .wri-label { font-size: 11px; color: var(--text); font-weight: 600; }
     .wri-track {
-      flex: 1;
       height: 5px;
-      background: rgba(255,255,255,0.07);
+      background: rgba(255,255,255,0.08);
       border-radius: 3px;
       overflow: hidden;
     }
+    .wri-fill { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
+    .wri-pct { font-size: 11px; color: var(--text); text-align: right;
+               font-variant-numeric: tabular-nums; font-weight: 600; }
 
-    .wri-fill {
-      height: 100%;
-      border-radius: 3px;
+    /* Pixel inspector */
+    .inspector-block {
+      border: 1px dashed var(--border);
+      border-radius: 4px;
+      padding: 7px 8px;
+      font-size: 12px;
     }
-
-    .wri-pct {
+    .inspector-block.has-data { border-style: solid; border-color: var(--border-2); }
+    .insp-coord { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; font-weight: 500; }
+    .insp-head { display: flex; justify-content: space-between; align-items: baseline;
+                 margin-bottom: 5px; }
+    .insp-wri { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .insp-class {
+      font-size: 10px; padding: 2px 7px; border-radius: 3px;
+      text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700;
+    }
+    .insp-class.Low    { background: rgba(74, 220, 138, 0.18); color: var(--green); }
+    .insp-class.Medium { background: rgba(255, 179, 71, 0.18); color: var(--amber); }
+    .insp-class.High   { background: rgba(255, 60, 31, 0.18);  color: var(--red); }
+    .insp-factor {
+      display: grid;
+      grid-template-columns: 74px 1fr 40px;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 2px;
       font-size: 11px;
-      color: var(--text);
-      width: 32px;
-      text-align: right;
-      flex-shrink: 0;
     }
+    .insp-factor .fname { color: var(--text); font-weight: 500; }
+    .insp-factor .ftrk  { height: 4px; background: rgba(255,255,255,0.08);
+                          border-radius: 2px; overflow: hidden; }
+    .insp-factor .ffill { height: 100%; border-radius: 2px; }
+    .insp-factor .fval  { text-align: right; color: var(--text);
+                          font-variant-numeric: tabular-nums; font-weight: 600; }
 
-    /* data source note */
-    .datasource {
-      font-size: 10px;
-      color: var(--text-dim);
-      line-height: 1.6;
-      border-top: 1px solid var(--border);
-      padding-top: 8px;
-    }
-
-    .datasource a {
-      color: rgba(0,212,255,0.6);
-      text-decoration: none;
-    }
-
-    /* ── Bottom Bar — Timeline ────────────────────────────────────────── */
+    /* Bottom — FIRMS time-series chart */
     .panel-bottom {
       grid-column: 1 / -1;
       background: rgba(5, 8, 14, 0.95);
       border-top: 1px solid var(--border);
       display: flex;
-      align-items: stretch;
-      padding: 0 20px;
-      gap: 20px;
+      padding: 10px 20px 12px;
+      min-height: 0;
     }
 
-    .timeline-section {
+    .chart-section { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; min-height: 0; }
+    .chart-label {
+      font-size: 11px; color: var(--text-dim); font-weight: 600;
+      letter-spacing: 0.08em; text-transform: uppercase;
+    }
+    .chart-host {
       flex: 1;
+      position: relative;
+      min-height: 0;
+    }
+    .chart-host svg { width: 100%; height: 100%; display: block; overflow: visible; }
+    .chart-axis { font-size: 10px; fill: var(--text-dim); font-family: var(--font); font-weight: 500; }
+    .chart-grid { stroke: rgba(255,255,255,0.06); stroke-width: 1; }
+
+    /* Curve line chart */
+    .chart-area  { fill: url(#emberAreaGrad); opacity: 0.35; }
+    .chart-line  { fill: none; stroke: var(--red); stroke-width: 1.8;
+                   stroke-linejoin: round; stroke-linecap: round;
+                   filter: drop-shadow(0 0 4px rgba(255, 60, 31, 0.5)); }
+    .chart-dot   { fill: var(--red); stroke: #0a0e16; stroke-width: 1; }
+    .chart-dot:hover { fill: var(--amber); r: 4; }
+    .chart-empty {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; color: var(--text-dim); font-weight: 500;
+      letter-spacing: 0.05em;
+    }
+
+    /* Fire-activity mini-stats (right panel, below Pixel Inspector) */
+    .fire-stats {
       display: flex;
       flex-direction: column;
-      justify-content: center;
-      gap: 6px;
-      padding: 12px 0;
+      gap: 2px;
     }
-
-    .timeline-label {
-      font-size: 10px;
+    .bstat {
+      display: flex; justify-content: space-between; align-items: baseline;
+      gap: 8px;
+      padding: 4px 2px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    }
+    .bstat:last-child { border-bottom: none; }
+    .bstat .blabel { font-size: 10px; color: var(--text-dim); text-transform: uppercase;
+                     letter-spacing: 0.05em; font-weight: 600; }
+    .bstat .bval   { font-size: 13px; font-weight: 700; color: var(--amber);
+                     font-variant-numeric: tabular-nums; text-align: right; }
+    .bstat .bval.bval-small { font-size: 10px; font-weight: 600; letter-spacing: 0.02em; }
+    .bstat .bval.bval-month {
+      font-size: 13px; font-weight: 700; color: var(--cyan);
+      letter-spacing: 0.04em;
+    }
+    .bstat .bval.bval-count {
+      font-size: 11px; font-weight: 600; color: var(--text-dim);
+    }
+    /* "↳ detections" sub-row under Peak Month: tucked under, no top border */
+    .bstat.bstat-sub {
+      padding: 0 2px 4px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      margin-top: -2px;
+    }
+    .bstat.bstat-sub .blabel {
+      text-transform: none;
+      letter-spacing: 0;
+      font-weight: 500;
       color: var(--text-dim);
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
+      opacity: 0.75;
     }
 
-    /* fake sparkline */
-    .sparkline {
-      width: 100%;
-      height: 36px;
-    }
-
-    .sparkline path { fill: none; stroke: var(--red); stroke-width: 1.5; opacity: 0.8; }
-    .sparkline .area { fill: url(#fireGrad); stroke: none; opacity: 0.4; }
-
-    .time-ticks {
-      display: flex;
-      justify-content: space-between;
-      font-size: 10px;
-      color: var(--text-dim);
-    }
-
-    .bottom-stats {
-      display: flex;
+    /* ── Factor Contribution Pie ─────────────────────────────────────── */
+    .contrib-wrap {
+      display: grid;
+      grid-template-columns: 82px 1fr;
+      gap: 8px;
       align-items: center;
-      gap: 24px;
-      border-left: 1px solid var(--border);
-      padding-left: 20px;
+      padding: 2px 0 0;
     }
+    .contrib-pie { width: 82px; height: 82px; position: relative; }
+    .contrib-pie svg { width: 100%; height: 100%; display: block; }
+    .contrib-pie .pie-center {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      pointer-events: none;
+    }
+    .contrib-pie .pie-center .pc-top {
+      font-size: 8px; color: var(--text-dim); font-weight: 600;
+      letter-spacing: 0.08em; text-transform: uppercase;
+    }
+    .contrib-pie .pie-center .pc-main {
+      font-size: 12px; color: var(--text); font-weight: 700;
+      font-variant-numeric: tabular-nums; line-height: 1.15;
+    }
+    .contrib-pie .pie-slice {
+      transition: transform 0.15s ease, opacity 0.15s ease;
+      transform-origin: 50% 50%;
+    }
+    .contrib-pie .pie-slice:hover { opacity: 0.85; transform: scale(1.02); }
 
-    .bstat .blabel { font-size: 10px; color: var(--text-dim); }
-    .bstat .bval   { font-size: 16px; font-weight: 700; color: var(--amber); }
+    .contrib-legend { display: flex; flex-direction: column; gap: 2px; }
+    .contrib-legend .lg-row {
+      display: grid;
+      grid-template-columns: 9px 1fr auto;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+    }
+    .contrib-legend .lg-swatch {
+      width: 8px; height: 8px; border-radius: 2px;
+      box-shadow: 0 0 4px rgba(0,0,0,0.4);
+    }
+    .contrib-legend .lg-name { color: var(--text); font-weight: 500;
+                               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .contrib-legend .lg-pct  { color: var(--text-dim); font-weight: 600;
+                               font-variant-numeric: tabular-nums; font-size: 10px; }
 
     /* ── Scrollbar ────────────────────────────────────────────────────── */
     ::-webkit-scrollbar { width: 4px; }
@@ -470,132 +964,259 @@
 
   <!-- ── TOP BAR ─────────────────────────────────────────────────────── -->
   <header class="topbar">
-    <img class="logo" src="../EMBER_LOGO.svg" alt="EMBER" />
+    <img class="logo" src="../2.svg" alt="EMBER" />
     <div class="divider"></div>
     <span class="title">Earth Monitoring of Burn Exposure Risk</span>
-    <div class="status-dot"></div>
-    <span class="status-label">LIVE</span>
     <span class="subtitle">CASA0025 · UCL Centre for Advanced Spatial Analysis</span>
+    <div class="status-wrap">
+      <div class="status-dot" id="statusDot"></div>
+      <span class="status-msg" id="statusMsg">Initialising…</span>
+    </div>
+    <button class="tour-open-btn" id="tourOpen"
+            title="Replay guided tour" aria-label="Replay guided tour">?</button>
   </header>
 
-  <!-- ── LEFT PANEL ──────────────────────────────────────────────────── -->
+  <!-- ══ GUIDED TOUR OVERLAY ══════════════════════════════════════════ -->
+  <div class="tour-root" id="tourRoot" aria-hidden="true">
+    <!-- Spotlight: a transparent box with a huge outer shadow that dims
+         everything outside. Positioned via JS over the target element. -->
+    <div class="tour-spotlight" id="tourSpotlight"></div>
+
+    <!-- Tooltip card: title, body, step counter, Prev / Skip / Next. -->
+    <div class="tour-tooltip" id="tourTooltip" role="dialog" aria-modal="true">
+      <div class="tour-tip-head">
+        <span class="tour-count" id="tourCount">1 / 10</span>
+        <button class="tour-skip" id="tourSkip">Skip tour ✕</button>
+      </div>
+      <div class="tour-title" id="tourTitle">—</div>
+      <div class="tour-body"  id="tourBody">—</div>
+      <div class="tour-actions">
+        <button class="tour-btn tour-btn-ghost" id="tourPrev">← Back</button>
+        <button class="tour-btn tour-btn-cta"   id="tourNext">Next →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── LEFT PANEL — Controls ──────────────────────────────────────── -->
   <aside class="panel-left">
 
-    <div class="datetime">
-      <div class="day" id="liveDate">Loading…</div>
-      <div class="meta">☁️ &nbsp;<span id="humidity">—</span> &nbsp;&nbsp; 🌡 <span id="temp">—</span></div>
+    <div class="ctl-section" data-tour="analysis-window">
+      <h4>Analysis Window</h4>
+      <div class="row">
+        <label for="startDate">Start</label>
+        <input type="date" id="startDate" />
+      </div>
+      <div class="row">
+        <label for="endDate">End</label>
+        <input type="date" id="endDate" />
+      </div>
     </div>
 
-    <!-- Geomorphology -->
-    <div class="legend-section">
-      <h4>Geomorphology</h4>
-      <div class="legend-item"><div class="swatch shrub"></div> Shrub</div>
-      <div class="legend-item"><div class="swatch woodland"></div> Woodland</div>
-      <div class="legend-item"><div class="swatch water"></div> Water system</div>
-      <div class="legend-item"><div class="swatch contour"></div> Contour</div>
-      <div class="legend-item"><div class="swatch road"></div> Road</div>
+    <div class="ctl-section" data-tour="factor-weights">
+      <h4>
+        Factor Weights
+        <span class="help-chip" tabindex="0" aria-label="Factor abbreviations">
+          ?
+          <div class="help-pop" role="tooltip">
+            <div class="help-title">Risk Factors</div>
+            <div class="help-item"><b>VDI</b><span>Vegetation Dryness Index · how dry the fuel is</span></div>
+            <div class="help-item"><b>LST</b><span>Land Surface Temperature · surface heat</span></div>
+            <div class="help-item"><b>PA</b><span>Precipitation Anomaly · rainfall deficit</span></div>
+            <div class="help-item"><b>WS</b><span>Wind Speed · ignition spread potential</span></div>
+            <div class="help-item"><b>SLOPE</b><span>Terrain Slope · fire propagates uphill</span></div>
+            <div class="help-item"><b>HFD</b><span>Historical Fire Density · past burn frequency</span></div>
+          </div>
+        </span>
+      </h4>
+      <select id="presetSel" style="width:100%; margin-bottom: 6px;">
+        <option value="balanced">Preset · Balanced (default)</option>
+        <option value="drought">Preset · Drought / Heat focus</option>
+        <option value="vegetation">Preset · Vegetation focus</option>
+        <option value="history">Preset · Fire-history focus</option>
+        <option value="terrain">Preset · Terrain / Wind focus</option>
+        <option value="custom">Custom…</option>
+      </select>
+
+      <div class="slider-row" title="VDI — Vegetation Dryness Index: how dry the fuel is">
+        <span class="sname">VDI</span>
+        <input type="range" id="wVDI" min="0" max="100" value="17" />
+        <span class="sval" id="wVDIv">17%</span>
+      </div>
+      <div class="slider-row" title="LST — Land Surface Temperature: surface heat">
+        <span class="sname">LST</span>
+        <input type="range" id="wLST" min="0" max="100" value="17" />
+        <span class="sval" id="wLSTv">17%</span>
+      </div>
+      <div class="slider-row" title="PA — Precipitation Anomaly: rainfall deficit vs. normal">
+        <span class="sname">PA</span>
+        <input type="range" id="wPA" min="0" max="100" value="17" />
+        <span class="sval" id="wPAv">17%</span>
+      </div>
+      <div class="slider-row" title="WS — Wind Speed: ignition & spread potential">
+        <span class="sname">WS</span>
+        <input type="range" id="wWS" min="0" max="100" value="17" />
+        <span class="sval" id="wWSv">17%</span>
+      </div>
+      <div class="slider-row" title="SLOPE — Terrain Slope: fire propagates faster uphill">
+        <span class="sname">SLOPE</span>
+        <input type="range" id="wSLOPE" min="0" max="100" value="16" />
+        <span class="sval" id="wSLOPEv">16%</span>
+      </div>
+      <div class="slider-row" title="HFD — Historical Fire Density: past burn frequency">
+        <span class="sname">HFD</span>
+        <input type="range" id="wHFD" min="0" max="100" value="16" />
+        <span class="sval" id="wHFDv">16%</span>
+      </div>
     </div>
 
-    <!-- Weather -->
-    <div class="legend-section">
-      <h4>Weather</h4>
-      <div class="legend-item"><div class="swatch wind-icon">💨</div> Wind</div>
-      <div class="legend-item"><div class="swatch precip-icon">🌧</div> Precipitation</div>
+    <div class="ctl-section" data-tour="run">
+      <h4>Run</h4>
+      <div class="draw-tools">
+        <button class="draw-btn" id="drawRect" title="Draw a rectangular AOI">
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <rect x="2.5" y="4.5" width="11" height="7" fill="none"
+                  stroke="currentColor" stroke-width="1.5" rx="0.5"/>
+          </svg>
+          Rectangle
+        </button>
+        <button class="draw-btn" id="drawPoly" title="Draw a polygon AOI">
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <polygon points="8,2 14,6 12,13 4,13 2,6" fill="none"
+                     stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+          </svg>
+          Polygon
+        </button>
+      </div>
+      <div class="aoi-status" id="aoiStatus">Click a shape above to draw your AOI.</div>
+      <button class="btn" id="runBtn" disabled>▶ Run Analysis</button>
+      <button class="btn secondary" id="clearBtn">Clear AOI</button>
     </div>
 
-    <!-- Fire related -->
-    <div class="legend-section">
-      <h4>Fire Related</h4>
-      <div class="legend-item"><div class="swatch residential"></div> Residential area</div>
-      <div class="legend-item"><div class="swatch spread"></div> Fire spread area</div>
-      <div class="legend-item"><div class="swatch barrier"></div> Fire barrier</div>
-      <div class="legend-item"><div class="swatch fire"></div> Fire</div>
+    <div class="ctl-section" data-tour="layers">
+      <h4>Map Layers</h4>
+      <div class="lyr-row" data-layer="Risk Classification (High / Medium / Low)" data-default-opacity="35">
+        <label class="lyr-check">
+          <input type="checkbox" checked />
+          <span class="lyr-name">Risk Classes</span>
+        </label>
+        <input type="range" min="0" max="100" value="35" />
+        <span class="lyr-pct">35%</span>
+      </div>
+      <div class="lyr-row" data-layer="WRI — Continuous" data-default-opacity="100">
+        <label class="lyr-check">
+          <input type="checkbox" checked />
+          <span class="lyr-name">WRI Continuous</span>
+        </label>
+        <input type="range" min="0" max="100" value="100" />
+        <span class="lyr-pct">100%</span>
+      </div>
+      <div class="lyr-row" data-layer="Active Fires — 30 days" data-default-opacity="55">
+        <label class="lyr-check">
+          <input type="checkbox" checked />
+          <span class="lyr-name">Active Fires (30d)</span>
+        </label>
+        <input type="range" min="0" max="100" value="55" />
+        <span class="lyr-pct">55%</span>
+      </div>
+      <div class="lyr-row lyr-row--toggle" data-layer="__AOI__">
+        <label class="lyr-check">
+          <input type="checkbox" checked />
+          <span class="lyr-name">AOI Polygon</span>
+        </label>
+        <span class="lyr-badge empty" id="aoiBadge">empty</span>
+      </div>
     </div>
 
-    <!-- WRI scale -->
-    <div class="legend-section">
+    <div class="ctl-section">
+      <h4>Map Options</h4>
+      <div class="row">
+        <label style="width:60px;">Basemap</label>
+        <select id="basemapSel">
+          <option value="DARK" selected>Dark (EMBER)</option>
+          <option value="HYBRID">Hybrid</option>
+          <option value="SATELLITE">Satellite</option>
+          <option value="TERRAIN">Terrain</option>
+          <option value="ROADMAP">Roadmap</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="ctl-section" style="margin-top:auto;">
       <h4>Wildfire Risk Index</h4>
-      <div class="risk-scale"></div>
-      <div class="risk-labels"><span>Low</span><span>Medium</span><span>High</span></div>
-    </div>
 
-    <div style="font-size:10px; color:var(--text-dim); margin-top:auto;">
-      All data via Google Earth Engine public catalogue. Reference use only.
+      <!-- Continuous WRI gradient (matches the WRI Continuous raster palette) -->
+      <div class="risk-scale"></div>
+      <div class="risk-scale-ticks"><span>0</span><span>0.5</span><span>1.0</span></div>
+
+      <!-- Discrete class bins (matches the Risk Classes raster palette) -->
+      <div class="class-legend">
+        <div class="class-row">
+          <span class="class-swatch" style="background:#2ecc71"></span>
+          <span class="class-name">Low</span>
+          <span class="class-range">WRI &lt; 0.33</span>
+        </div>
+        <div class="class-row">
+          <span class="class-swatch" style="background:#f39c12"></span>
+          <span class="class-name">Medium</span>
+          <span class="class-range">0.33 – 0.67</span>
+        </div>
+        <div class="class-row">
+          <span class="class-swatch" style="background:#c0392b"></span>
+          <span class="class-name">High</span>
+          <span class="class-range">WRI ≥ 0.67</span>
+        </div>
+      </div>
+
+      <div class="data-note">
+        Data: MODIS · ERA5-Land · CHIRPS · SRTM · FIRMS.
+      </div>
     </div>
 
   </aside>
 
   <!-- ── MAIN — GEE iframe ────────────────────────────────────────────── -->
-  <main class="panel-main">
-    <!--
-      Replace the placeholder div with your GEE App iframe after deployment:
-
-      <iframe src="https://YOUR_USERNAME.users.earthengine.app/view/ember"
-              allowfullscreen></iframe>
-
-      And remove the .gee-placeholder div below.
-    -->
+  <main class="panel-main" id="geeMount">
     <div class="gee-placeholder">
       <div class="ember-glow"></div>
-      <p>Google Earth Engine App</p>
-      <div class="deploy-note">Deploy GEE App and replace this placeholder with iframe</div>
+      <p>Loading Google Earth Engine App…</p>
+    </div>
+    <div class="scanlines"></div>
+    <div class="map-zoom">
+      <button class="zoom-btn" id="zoomIn"  title="Zoom in"  aria-label="Zoom in">+</button>
+      <button class="zoom-btn" id="zoomOut" title="Zoom out" aria-label="Zoom out">−</button>
     </div>
   </main>
 
   <!-- ── RIGHT PANEL ─────────────────────────────────────────────────── -->
   <aside class="panel-right">
 
-    <div class="section-title">Local Monitoring</div>
-
+    <div data-tour="summary">
+    <div class="section-title">AOI Summary</div>
     <div class="metrics">
       <div class="metric">
-        <div class="label">Fire Area (HA)</div>
+        <div class="label">AOI Area</div>
+        <div class="value cyan" id="aoiArea">—</div>
+        <div class="unit">km²</div>
+      </div>
+      <div class="metric">
+        <div class="label">Scale</div>
+        <div class="value amber" id="aoiScale">—</div>
+        <div class="unit">m / pixel</div>
+      </div>
+      <div class="metric">
+        <div class="label">Mean WRI</div>
+        <div class="value cyan" id="wriMean">—</div>
+        <div class="unit" id="wriMaxLine">max —</div>
+      </div>
+      <div class="metric">
+        <div class="label">High-Risk Area</div>
         <div class="value red" id="fireArea">—</div>
-        <div class="trend up" id="fireAreaTrend"></div>
-      </div>
-      <div class="metric">
-        <div class="label">Expansion (m/s)</div>
-        <div class="value orange" id="expansion">—</div>
-        <div class="trend up">▲ Active</div>
-      </div>
-      <div class="metric">
-        <div class="label">Duration (min)</div>
-        <div class="value" id="duration">—</div>
-      </div>
-      <div class="metric">
-        <div class="label">Mean WRI Score</div>
-        <div class="value cyan" id="wriScore">—</div>
+        <div class="unit">km²</div>
       </div>
     </div>
 
-    <div class="section-title">AOI Risk Map</div>
-    <div class="minimap">
-      <div class="minimap-dot"></div>
-      <span class="minimap-label">Awaiting AOI selection</span>
-    </div>
-
-    <div class="section-title">Climate Conditions</div>
-    <div class="climate-grid">
-      <div class="climate-item">
-        <div class="clabel">Temperature</div>
-        <div class="cval" id="climTemp">— °C</div>
-      </div>
-      <div class="climate-item">
-        <div class="clabel">Humidity</div>
-        <div class="cval" id="climHum">— %rh</div>
-      </div>
-      <div class="climate-item">
-        <div class="clabel">Weather</div>
-        <div class="cval" id="climWx">—</div>
-      </div>
-      <div class="climate-item">
-        <div class="clabel">Wind</div>
-        <div class="cval" id="climWind">—</div>
-      </div>
-    </div>
-
-    <div class="section-title">Risk Breakdown (AOI)</div>
-    <div class="wri-bar-wrap">
+    <div class="section-title">Risk Breakdown</div>
+    <div>
       <div class="wri-row">
         <span class="wri-label">High</span>
         <div class="wri-track"><div class="wri-fill" id="barHigh" style="width:0%;background:var(--red)"></div></div>
@@ -608,50 +1229,59 @@
       </div>
       <div class="wri-row">
         <span class="wri-label">Low</span>
-        <div class="wri-track"><div class="wri-fill" id="barLow" style="width:0%;background:#4adc8a"></div></div>
+        <div class="wri-track"><div class="wri-fill" id="barLow" style="width:0%;background:var(--green)"></div></div>
         <span class="wri-pct" id="pctLow">—</span>
       </div>
     </div>
+    </div><!-- /data-tour="summary" -->
 
-    <div class="datasource">
-      Data: MODIS · ERA5-Land · CHIRPS · SRTM · FIRMS<br/>
-      <a href="https://github.com/ArthurZhang69/EMBER" target="_blank">github.com/ArthurZhang69/EMBER</a>
+    <div data-tour="contribution">
+    <div class="section-title">Factor Contribution</div>
+    <div id="contribList">
+      <div style="font-size:12px; color:var(--text-dim); padding: 4px 0;">Run analysis to see which factors drive the WRI most.</div>
     </div>
+    </div>
+
+    <div data-tour="inspector">
+    <div class="section-title">Pixel Inspector</div>
+    <div class="inspector-block" id="inspectorBlock">
+      <div style="font-size:10px; color:var(--text-dim);">
+        Click any point on the map after running an analysis to inspect its per-factor values.
+      </div>
+    </div>
+    </div>
+
+    <div data-tour="fire-activity" style="margin-top:auto;">
+    <div class="section-title">Fire Activity</div>
+    <div class="fire-stats">
+      <div class="bstat">
+        <div class="blabel">Total Detections</div>
+        <div class="bval" id="totalFires">—</div>
+      </div>
+      <div class="bstat">
+        <div class="blabel">Peak Month</div>
+        <div class="bval bval-month" id="peakMonth">—</div>
+      </div>
+      <div class="bstat bstat-sub">
+        <div class="blabel">&nbsp;&nbsp;↳ detections</div>
+        <div class="bval bval-count" id="peakCount">—</div>
+      </div>
+      <div class="bstat">
+        <div class="blabel">Window</div>
+        <div class="bval bval-small" id="windowLabel">—</div>
+      </div>
+    </div>
+    </div><!-- /data-tour="fire-activity" -->
 
   </aside>
 
-  <!-- ── BOTTOM — Timeline ───────────────────────────────────────────── -->
+  <!-- ── BOTTOM — 12-month FIRMS chart (full width) ──────────────────── -->
   <footer class="panel-bottom">
-    <div class="timeline-section">
-      <div class="timeline-label">Fire Activity Timeline (24h)</div>
-      <svg class="sparkline" viewBox="0 0 600 40" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <linearGradient id="fireGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%"   stop-color="#ff3c1f" stop-opacity="0.6"/>
-            <stop offset="100%" stop-color="#ff3c1f" stop-opacity="0"/>
-          </linearGradient>
-        </defs>
-        <path class="area" d="M0,38 C40,36 60,30 100,28 C140,26 160,22 200,20 C240,18 260,15 300,12 C340,9 360,10 400,8 C440,6 480,4 540,3 L600,2 L600,40 L0,40 Z"/>
-        <path d="M0,38 C40,36 60,30 100,28 C140,26 160,22 200,20 C240,18 260,15 300,12 C340,9 360,10 400,8 C440,6 480,4 540,3 L600,2"/>
-      </svg>
-      <div class="time-ticks">
-        <span>00:00</span><span>04:00</span><span>08:00</span>
-        <span>12:00</span><span>16:00</span><span>20:00</span><span>24:00</span>
-      </div>
-    </div>
-
-    <div class="bottom-stats">
-      <div class="bstat">
-        <div class="blabel">Active Fire Points</div>
-        <div class="bval" id="activeFirePts">—</div>
-      </div>
-      <div class="bstat">
-        <div class="blabel">Spread Speed</div>
-        <div class="bval" id="spreadSpeed">— m/s</div>
-      </div>
-      <div class="bstat">
-        <div class="blabel">Analysis Window</div>
-        <div class="bval" id="analysisWindow">—</div>
+    <div class="chart-section">
+      <div class="chart-label">FIRMS Fire Detections — Monthly Count in AOI (last 12 months)</div>
+      <div class="chart-host" id="chartHost">
+        <div class="chart-empty" id="chartEmpty">Run an analysis to populate the chart</div>
+        <svg id="firmsChart" xmlns="http://www.w3.org/2000/svg" style="display:none;"></svg>
       </div>
     </div>
   </footer>
@@ -659,50 +1289,921 @@
 </div>
 
 <script>
-  // ── Live date/time display ─────────────────────────────────────────
-  function updateDate() {
-    const now = new Date();
-    const opts = { weekday:'long', year:'numeric', month:'long', day:'numeric' };
-    document.getElementById('liveDate').textContent = now.toLocaleDateString('en-GB', opts);
+  // ════════════════════════════════════════════════════════════════════
+  //  EMBER Dashboard — outer shell
+  //  All UI controls live here; the GEE iframe only renders the map.
+  //  Communicates with the GEE App via window.postMessage.
+  // ════════════════════════════════════════════════════════════════════
+
+  const GEE_APP_URL = 'https://arthur0609.projects.earthengine.app/view/ember-ver02';
+
+  // ── Mount GEE iframe ───────────────────────────────────────────────
+  // We must preserve the zoom buttons (already in the DOM) — only replace
+  // the placeholder, and prepend the iframe + scanlines.
+  let geeFrame = null;
+  (function mountGeeApp() {
+    const override = new URLSearchParams(location.search).get('app');
+    const url = override || GEE_APP_URL;
+    if (!url) return;
+    const mount = document.getElementById('geeMount');
+    if (!mount) return;
+    const placeholder = mount.querySelector('.gee-placeholder');
+    if (placeholder) placeholder.remove();
+    mount.insertAdjacentHTML('afterbegin',
+      '<iframe id="geeIframe" src="' + url + '" allowfullscreen ' +
+      'allow="fullscreen; clipboard-read; clipboard-write" ' +
+      'referrerpolicy="no-referrer-when-downgrade"></iframe>' +
+      '<div class="scanlines"></div>'
+    );
+    geeFrame = document.getElementById('geeIframe');
+  })();
+
+  function postToGee(msg) {
+    if (!geeFrame || !geeFrame.contentWindow) return;
+    geeFrame.contentWindow.postMessage(msg, '*');
   }
-  updateDate();
-  setInterval(updateDate, 60000);
 
-  // ── Receive stats from GEE App via postMessage ────────────────────
-  // When the GEE App iframe posts data, update the dashboard panels.
-  // Example message format from GEE app:
-  // window.parent.postMessage({ type:'EMBER_STATS', fireArea:4235,
-  //   expansion:145, duration:288, wri:0.72,
-  //   high:38, medium:41, low:21,
-  //   temp:14, humidity:34, weather:'Fine', wind:'East wind' }, '*');
+  // ── Date defaults: a 12-month window ending today ──────────────────
+  (function initDates() {
+    const end = new Date();
+    const start = new Date();
+    start.setFullYear(end.getFullYear() - 1);
+    const iso = d => d.toISOString().slice(0, 10);
+    document.getElementById('startDate').value = iso(start);
+    document.getElementById('endDate').value   = iso(end);
+    document.getElementById('windowLabel').textContent = iso(start) + ' → ' + iso(end);
+  })();
 
+  ['startDate', 'endDate'].forEach(id => {
+    document.getElementById(id).addEventListener('change', () => {
+      const s = document.getElementById('startDate').value;
+      const e = document.getElementById('endDate').value;
+      document.getElementById('windowLabel').textContent = s + ' → ' + e;
+    });
+  });
+
+  // ── Weight sliders ─────────────────────────────────────────────────
+  const FACTOR_KEYS = ['VDI', 'LST', 'PA', 'WS', 'SLOPE', 'HFD'];
+  const FACTOR_NAMES = {
+    VDI:   'Vegetation Dryness',
+    LST:   'Land Surface Temp',
+    PA:    'Precip. Deficit',
+    WS:    'Wind Speed',
+    SLOPE: 'Terrain Slope',
+    HFD:   'Fire History'
+  };
+
+  const PRESETS = {
+    balanced:   { VDI: 17, LST: 17, PA: 17, WS: 17, SLOPE: 16, HFD: 16 },
+    drought:    { VDI: 20, LST: 25, PA: 25, WS: 10, SLOPE: 5,  HFD: 15 },
+    vegetation: { VDI: 35, LST: 15, PA: 15, WS: 10, SLOPE: 10, HFD: 15 },
+    history:    { VDI: 15, LST: 15, PA: 10, WS: 10, SLOPE: 10, HFD: 40 },
+    terrain:    { VDI: 10, LST: 10, PA: 10, WS: 30, SLOPE: 30, HFD: 10 }
+  };
+
+  function readWeights() {
+    const raw = {};
+    let total = 0;
+    FACTOR_KEYS.forEach(k => {
+      const v = Number(document.getElementById('w' + k).value) || 0;
+      raw[k] = v;
+      total += v;
+    });
+    if (total === 0) {
+      // fallback to balanced to avoid div-by-zero on GEE side
+      return { w1: 1/6, w2: 1/6, w3: 1/6, w4: 1/6, w5: 1/6, w6: 1/6 };
+    }
+    return {
+      w1: raw.VDI   / total,
+      w2: raw.LST   / total,
+      w3: raw.PA    / total,
+      w4: raw.WS    / total,
+      w5: raw.SLOPE / total,
+      w6: raw.HFD   / total
+    };
+  }
+
+  function refreshSliderLabels() {
+    let total = 0;
+    FACTOR_KEYS.forEach(k => total += Number(document.getElementById('w' + k).value) || 0);
+    FACTOR_KEYS.forEach(k => {
+      const raw = Number(document.getElementById('w' + k).value) || 0;
+      const pct = total > 0 ? Math.round((raw / total) * 100) : 0;
+      document.getElementById('w' + k + 'v').textContent = pct + '%';
+    });
+  }
+
+  FACTOR_KEYS.forEach(k => {
+    document.getElementById('w' + k).addEventListener('input', () => {
+      document.getElementById('presetSel').value = 'custom';
+      refreshSliderLabels();
+    });
+  });
+
+  document.getElementById('presetSel').addEventListener('change', e => {
+    const preset = PRESETS[e.target.value];
+    if (!preset) return;
+    FACTOR_KEYS.forEach(k => {
+      document.getElementById('w' + k).value = preset[k];
+    });
+    refreshSliderLabels();
+  });
+  refreshSliderLabels();
+
+  // ── Status indicator ───────────────────────────────────────────────
+  function setStatus(state, message) {
+    const dot = document.getElementById('statusDot');
+    const msg = document.getElementById('statusMsg');
+    dot.classList.remove('ready', 'loading', 'done', 'error');
+    if (state) dot.classList.add(state);
+    if (message) msg.textContent = message;
+  }
+
+  // ── AOI state ──────────────────────────────────────────────────────
+  let currentAOI = null;   // { areaKm2, bbox }
+  function setAOIStatus(aoi) {
+    const el = document.getElementById('aoiStatus');
+    const runBtn = document.getElementById('runBtn');
+    const badge  = document.getElementById('aoiBadge');
+    if (aoi) {
+      el.classList.add('active');
+      el.textContent = '✓ AOI ready · ' + aoi.areaKm2.toFixed(1) + ' km²';
+      runBtn.disabled = false;
+      document.getElementById('aoiArea').textContent = aoi.areaKm2 >= 1000
+        ? aoi.areaKm2.toFixed(0)
+        : aoi.areaKm2.toFixed(1);
+      if (badge) { badge.textContent = 'drawn'; badge.classList.remove('empty'); }
+    } else {
+      el.classList.remove('active');
+      el.textContent = 'Click a shape above to draw your AOI.';
+      runBtn.disabled = true;
+      document.getElementById('aoiArea').textContent = '—';
+      if (badge) { badge.textContent = 'empty'; badge.classList.add('empty'); }
+    }
+    clearDrawActive();
+  }
+
+  // ── AOI draw buttons (dark-themed replacement for GEE's native panel) ──
+  function setDrawActive(shape) {
+    document.getElementById('drawRect').classList.toggle('active', shape === 'rectangle');
+    document.getElementById('drawPoly').classList.toggle('active', shape === 'polygon');
+  }
+  function clearDrawActive() { setDrawActive(null); }
+
+  function startDraw(shape) {
+    setDrawActive(shape);
+    postToGee({ type: 'DRAW_START', shape: shape });
+    const el = document.getElementById('aoiStatus');
+    el.classList.remove('active');
+    el.textContent = shape === 'rectangle'
+      ? 'Click + drag on the map to draw a rectangle.'
+      : 'Click points on the map; double-click to finish.';
+  }
+
+  document.getElementById('drawRect').addEventListener('click', () => startDraw('rectangle'));
+  document.getElementById('drawPoly').addEventListener('click', () => startDraw('polygon'));
+
+  // ── Run / Clear buttons ────────────────────────────────────────────
+  document.getElementById('runBtn').addEventListener('click', () => {
+    const start = document.getElementById('startDate').value;
+    const end   = document.getElementById('endDate').value;
+    if (!start || !end) {
+      setStatus('error', 'Please pick a valid date range.');
+      return;
+    }
+    if (new Date(start) >= new Date(end)) {
+      setStatus('error', 'Start date must be before end date.');
+      return;
+    }
+    setStatus('loading', 'Sending to Earth Engine…');
+    postToGee({ type: 'RUN', start: start, end: end, weights: readWeights() });
+  });
+
+  document.getElementById('clearBtn').addEventListener('click', () => {
+    postToGee({ type: 'DRAW_STOP' });
+    postToGee({ type: 'CLEAR_AOI' });
+    setAOIStatus(null);
+  });
+
+  document.getElementById('basemapSel').addEventListener('change', e => {
+    postToGee({ type: 'SET_BASEMAP', basemap: e.target.value });
+  });
+
+  // ── Map zoom buttons ───────────────────────────────────────────────
+  const _zoomIn  = document.getElementById('zoomIn');
+  const _zoomOut = document.getElementById('zoomOut');
+  if (_zoomIn)  _zoomIn .addEventListener('click', () => postToGee({ type: 'ZOOM', delta: +1 }));
+  if (_zoomOut) _zoomOut.addEventListener('click', () => postToGee({ type: 'ZOOM', delta: -1 }));
+
+  // ── Layer toggle + opacity ─────────────────────────────────────────
+  document.querySelectorAll('.lyr-row').forEach(row => {
+    const name = row.dataset.layer;
+    const cb   = row.querySelector('input[type="checkbox"]');
+    const op   = row.querySelector('input[type="range"]');
+    const pct  = row.querySelector('.lyr-pct');
+
+    if (cb) {
+      cb.addEventListener('change', () => {
+        postToGee({ type: 'TOGGLE_LAYER', layerName: name, visible: cb.checked });
+        // Dim the label when the layer is off, for visual feedback.
+        const nameEl = row.querySelector('.lyr-name');
+        if (nameEl) nameEl.classList.toggle('dim', !cb.checked);
+        if (op) op.disabled = !cb.checked;
+      });
+    }
+
+    if (op && pct) {
+      op.addEventListener('input', () => {
+        const v = Number(op.value);
+        pct.textContent = v + '%';
+        postToGee({ type: 'SET_OPACITY', layerName: name, opacity: v / 100 });
+      });
+    }
+  });
+
+  // ── Inbound messages from GEE iframe ──────────────────────────────
   window.addEventListener('message', function(e) {
     const d = e.data;
-    if (!d || d.type !== 'EMBER_STATS') return;
+    if (!d || !d.type) return;
 
-    if (d.fireArea  != null) document.getElementById('fireArea').textContent   = d.fireArea.toLocaleString();
-    if (d.expansion != null) document.getElementById('expansion').textContent  = d.expansion;
-    if (d.duration  != null) document.getElementById('duration').textContent   = d.duration;
-    if (d.wri       != null) document.getElementById('wriScore').textContent   = d.wri.toFixed(2);
-
-    if (d.high != null) {
-      document.getElementById('pctHigh').textContent = d.high + '%';
-      document.getElementById('barHigh').style.width  = d.high + '%';
+    switch (d.type) {
+      case 'STATUS':        handleStatus(d);        break;
+      case 'AOI_DRAWN':     handleAOIDrawn(d);      break;
+      case 'AOI_CLEARED':   handleAOICleared();     break;
+      case 'AOI_HIDDEN':    hideAOIPolygonLayer();  break;
+      case 'EMBER_STATS':   handleStats(d);         break;
+      case 'PIXEL_INSPECT_START': handleInspectStart(d); break;
+      case 'PIXEL_INSPECT': handleInspect(d);       break;
+      case 'TIMESERIES':    handleTimeseries(d);    break;
     }
-    if (d.medium != null) {
-      document.getElementById('pctMed').textContent = d.medium + '%';
-      document.getElementById('barMed').style.width  = d.medium + '%';
-    }
-    if (d.low != null) {
-      document.getElementById('pctLow').textContent = d.low + '%';
-      document.getElementById('barLow').style.width  = d.low + '%';
-    }
-
-    if (d.temp     != null) document.getElementById('climTemp').textContent    = d.temp + ' °C';
-    if (d.humidity != null) document.getElementById('climHum').textContent     = d.humidity + ' %rh';
-    if (d.weather  != null) document.getElementById('climWx').textContent      = d.weather;
-    if (d.wind     != null) document.getElementById('climWind').textContent    = d.wind;
   });
+
+  function handleStatus(d) {
+    setStatus(d.state || '', d.message || '');
+  }
+
+  function handleAOIDrawn(d) {
+    currentAOI = { areaKm2: Number(d.areaKm2) || 0, bbox: d.bbox };
+    setAOIStatus(currentAOI);
+    // If a previous run auto-hid the AOI layer, restore it on re-draw so
+    // the user can see the new polygon they just finished drawing.
+    showAOIPolygonLayer();
+  }
+
+  function showAOIPolygonLayer() {
+    const row = document.querySelector('.lyr-row[data-layer="__AOI__"]');
+    if (!row) return;
+    const cb = row.querySelector('input[type="checkbox"]');
+    if (!cb || cb.checked) return;
+    cb.checked = true;
+    postToGee({ type: 'TOGGLE_LAYER', layerName: '__AOI__', visible: true });
+    const nameEl = row.querySelector('.lyr-name');
+    if (nameEl) nameEl.classList.remove('dim');
+  }
+
+  function handleAOICleared() {
+    currentAOI = null;
+    setAOIStatus(null);
+  }
+
+  // ── Stats payload → right-panel metrics + bars + contribution ─────
+  function handleStats(d) {
+    setValue('wriMean',  d.wri  != null ? d.wri.toFixed(3)  : '—');
+    document.getElementById('wriMaxLine').textContent =
+      'max ' + (d.wriMax != null ? d.wriMax.toFixed(3) : '—');
+    setValue('fireArea', d.fireArea != null ? Number(d.fireArea).toLocaleString() : '—');
+    setValue('aoiScale', d.scaleM != null ? d.scaleM : '—');
+    if (d.aoiKm2 != null) {
+      document.getElementById('aoiArea').textContent =
+        d.aoiKm2 >= 1000 ? d.aoiKm2.toFixed(0) : d.aoiKm2.toFixed(1);
+    }
+
+    // Risk breakdown bars (percentages)
+    setBar('High',   d.high);
+    setBar('Medium', d.medium);
+    setBar('Low',    d.low);
+
+    // Factor contribution → donut pie chart
+    renderContribPie(d.contribution || []);
+
+    // Fallback hide in case AOI_HIDDEN wasn't received (e.g. older GEE deploy).
+    hideAOIPolygonLayer();
+  }
+
+  // Programmatically flip the AOI layer row to "off" and tell the GEE iframe.
+  function hideAOIPolygonLayer() {
+    const row = document.querySelector('.lyr-row[data-layer="__AOI__"]');
+    if (!row) return;
+    const cb = row.querySelector('input[type="checkbox"]');
+    if (!cb || !cb.checked) return;
+    cb.checked = false;
+    postToGee({ type: 'TOGGLE_LAYER', layerName: '__AOI__', visible: false });
+    const nameEl = row.querySelector('.lyr-name');
+    if (nameEl) nameEl.classList.add('dim');
+  }
+
+  // Palette for pie slices — distinct hues, ordered to match factor list
+  const FACTOR_COLORS = {
+    VDI:   '#4adc8a', // green — vegetation
+    LST:   '#ff7c3a', // orange — temp
+    PA:    '#ffb347', // amber — precipitation deficit
+    WS:    '#00d4ff', // cyan — wind
+    SLOPE: '#a78bfa', // violet — slope
+    HFD:   '#ff3c1f'  // red — fire history
+  };
+
+  function renderContribPie(contribution) {
+    const host = document.getElementById('contribList');
+    host.innerHTML = '';
+
+    const rows = (contribution || []).filter(r => r && r.value != null)
+      .map(r => ({
+        key:   r.key,
+        name:  r.name || r.key,
+        value: Math.max(0, Number(r.value) || 0)
+      }));
+
+    const total = rows.reduce((s, r) => s + r.value, 0);
+
+    if (rows.length === 0 || total <= 0) {
+      host.innerHTML = '<div style="font-size:12px; color:var(--text-dim); padding:4px 0;">No contribution data.</div>';
+      return;
+    }
+
+    // Sort descending so biggest contributors appear first in the legend
+    rows.sort((a, b) => b.value - a.value);
+
+    const wrap = document.createElement('div');
+    wrap.className = 'contrib-wrap';
+
+    // ── Donut SVG ────────────────────────────────────────────────────
+    const size = 96, cx = size / 2, cy = size / 2;
+    const rOuter = 44, rInner = 26;
+
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const pieBox = document.createElement('div');
+    pieBox.className = 'contrib-pie';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + size + ' ' + size);
+
+    let angle = -Math.PI / 2; // start at 12 o'clock
+    rows.forEach(r => {
+      const frac = r.value / total;
+      const a1 = angle;
+      const a2 = angle + frac * Math.PI * 2;
+      angle = a2;
+
+      const path = document.createElementNS(svgNS, 'path');
+      path.setAttribute('d', donutSlicePath(cx, cy, rOuter, rInner, a1, a2));
+      path.setAttribute('fill', FACTOR_COLORS[r.key] || '#888');
+      path.setAttribute('class', 'pie-slice');
+      path.setAttribute('stroke', '#0a0e16');
+      path.setAttribute('stroke-width', '1');
+      const pctTxt = (frac * 100).toFixed(1) + '%';
+      const title = document.createElementNS(svgNS, 'title');
+      title.textContent = r.name + ' · ' + pctTxt;
+      path.appendChild(title);
+      svg.appendChild(path);
+    });
+
+    pieBox.appendChild(svg);
+
+    // Center label — top contributor share
+    const topFrac = rows[0].value / total;
+    const center = document.createElement('div');
+    center.className = 'pie-center';
+    center.innerHTML =
+      '<div class="pc-top">Top</div>' +
+      '<div class="pc-main">' + (topFrac * 100).toFixed(0) + '%</div>';
+    pieBox.appendChild(center);
+
+    wrap.appendChild(pieBox);
+
+    // ── Legend ───────────────────────────────────────────────────────
+    const legend = document.createElement('div');
+    legend.className = 'contrib-legend';
+    rows.forEach(r => {
+      const pct = (r.value / total) * 100;
+      const row = document.createElement('div');
+      row.className = 'lg-row';
+      row.innerHTML =
+        '<span class="lg-swatch" style="background:' + (FACTOR_COLORS[r.key] || '#888') + '"></span>' +
+        '<span class="lg-name">' + r.name + '</span>' +
+        '<span class="lg-pct">' + pct.toFixed(1) + '%</span>';
+      legend.appendChild(row);
+    });
+    wrap.appendChild(legend);
+
+    host.appendChild(wrap);
+  }
+
+  // SVG path for a donut slice (annulus arc) between two angles in radians
+  function donutSlicePath(cx, cy, rOuter, rInner, a1, a2) {
+    const large = (a2 - a1) > Math.PI ? 1 : 0;
+    const x1 = cx + rOuter * Math.cos(a1), y1 = cy + rOuter * Math.sin(a1);
+    const x2 = cx + rOuter * Math.cos(a2), y2 = cy + rOuter * Math.sin(a2);
+    const x3 = cx + rInner * Math.cos(a2), y3 = cy + rInner * Math.sin(a2);
+    const x4 = cx + rInner * Math.cos(a1), y4 = cy + rInner * Math.sin(a1);
+    return 'M ' + x1 + ' ' + y1 +
+           ' A ' + rOuter + ' ' + rOuter + ' 0 ' + large + ' 1 ' + x2 + ' ' + y2 +
+           ' L ' + x3 + ' ' + y3 +
+           ' A ' + rInner + ' ' + rInner + ' 0 ' + large + ' 0 ' + x4 + ' ' + y4 +
+           ' Z';
+  }
+
+  function setBar(cls, pct) {
+    if (pct == null) return;
+    const barId = 'bar' + (cls === 'Medium' ? 'Med' : cls);
+    const pctId = 'pct' + (cls === 'Medium' ? 'Med' : cls);
+    document.getElementById(barId).style.width = pct + '%';
+    document.getElementById(pctId).textContent = pct + '%';
+  }
+
+  function setValue(id, v) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = v;
+  }
+
+  function barColorForNorm(v) {
+    if (v >= 0.67) return '#ff3c1f';
+    if (v >= 0.33) return '#ff7c3a';
+    return '#4adc8a';
+  }
+
+  // ── Pixel inspector ────────────────────────────────────────────────
+  function handleInspectStart(d) {
+    const host = document.getElementById('inspectorBlock');
+    host.classList.remove('has-data');
+    host.innerHTML =
+      '<div class="insp-coord">Lat ' + d.lat.toFixed(4) + ' · Lon ' + d.lon.toFixed(4) + '</div>' +
+      '<div style="font-size:10px; color:var(--text-dim);">Sampling point…</div>';
+  }
+
+  function handleInspect(d) {
+    const host = document.getElementById('inspectorBlock');
+    host.classList.add('has-data');
+
+    if (!d.hasData) {
+      host.innerHTML =
+        '<div class="insp-coord">Lat ' + d.lat.toFixed(4) + ' · Lon ' + d.lon.toFixed(4) + '</div>' +
+        '<div style="font-size:11px; color:var(--red);">No data available at this location.</div>';
+      return;
+    }
+
+    // Sort factors by value descending
+    const rows = FACTOR_KEYS.map(k => ({
+      key: k,
+      name: FACTOR_NAMES[k],
+      value: Number((d.factors || {})[k] || 0)
+    })).sort((a, b) => b.value - a.value);
+
+    let html =
+      '<div class="insp-coord">Lat ' + d.lat.toFixed(4) + ' · Lon ' + d.lon.toFixed(4) + '</div>' +
+      '<div class="insp-head">' +
+        '<span class="insp-wri" style="color:' + barColorForNorm(d.wri) + '">' +
+          'WRI ' + Number(d.wri).toFixed(3) +
+        '</span>' +
+        '<span class="insp-class ' + d.riskLabel + '">' + d.riskLabel + '</span>' +
+      '</div>' +
+      '<div style="font-size:10px; color:var(--text-dim); margin-bottom:6px;">' +
+        'Historical fire record here: ' + (d.hfdRaw > 0 ? 'Yes' : 'No') +
+      '</div>';
+
+    rows.forEach(r => {
+      const pct = Math.max(2, Math.round(r.value * 100));
+      html +=
+        '<div class="insp-factor">' +
+          '<span class="fname">' + r.name + '</span>' +
+          '<div class="ftrk"><div class="ffill" style="width:' + pct + '%; background:' +
+            barColorForNorm(r.value) + ';"></div></div>' +
+          '<span class="fval">' + r.value.toFixed(3) + '</span>' +
+        '</div>';
+    });
+
+    host.innerHTML = html;
+  }
+
+  // ── FIRMS monthly time-series chart ────────────────────────────────
+  function handleTimeseries(d) {
+    const points = Array.isArray(d.points) ? d.points : [];
+    _lastPoints = points;
+    renderFirmsChart(points);
+  }
+
+  // Compact tick formatter — e.g. 1.2M / 340K / 85
+  function fmtTick(v) {
+    const n = Number(v) || 0;
+    if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1).replace(/\.0$/, '') + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1).replace(/\.0$/, '') + 'K';
+    return String(Math.round(n));
+  }
+
+  /**
+   * Build a smooth SVG path through the given points using a Catmull-Rom →
+   * cubic Bezier conversion. Tension 0.5 gives a natural, gently-curving line
+   * without introducing artificial peaks between data points.
+   */
+  function smoothPath(pts) {
+    if (!pts || pts.length === 0) return '';
+    if (pts.length === 1) {
+      return 'M ' + pts[0].x.toFixed(1) + ' ' + pts[0].y.toFixed(1);
+    }
+    const t = 0.5; // smoothing tension (0 = sharp, 1 = very round)
+    let d = 'M ' + pts[0].x.toFixed(1) + ' ' + pts[0].y.toFixed(1);
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[i - 1] || pts[i];
+      const p1 = pts[i];
+      const p2 = pts[i + 1];
+      const p3 = pts[i + 2] || p2;
+      const c1x = p1.x + (p2.x - p0.x) * (t / 3);
+      const c1y = p1.y + (p2.y - p0.y) * (t / 3);
+      const c2x = p2.x - (p3.x - p1.x) * (t / 3);
+      const c2y = p2.y - (p3.y - p1.y) * (t / 3);
+      d += ' C ' + c1x.toFixed(1) + ' ' + c1y.toFixed(1) +
+           ' ' + c2x.toFixed(1) + ' ' + c2y.toFixed(1) +
+           ' ' + p2.x.toFixed(1) + ' ' + p2.y.toFixed(1);
+    }
+    return d;
+  }
+
+  function renderFirmsChart(points) {
+    const host  = document.getElementById('chartHost');
+    const svg   = document.getElementById('firmsChart');
+    const empty = document.getElementById('chartEmpty');
+
+    if (!points.length) {
+      svg.style.display = 'none';
+      empty.style.display = 'flex';
+      return;
+    }
+    empty.style.display = 'none';
+    svg.style.display = 'block';
+
+    // Render at the host's actual pixel size so text scales 1:1.
+    const W = Math.max(320, host.clientWidth  || 600);
+    const H = Math.max(80,  host.clientHeight || 100);
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+
+    const padL = 44, padR = 12, padT = 8, padB = 18;
+    const innerW = W - padL - padR;
+    const innerH = H - padT - padB;
+
+    const maxCount = Math.max(1, ...points.map(p => Number(p.count) || 0));
+    // Points span the inner area; first at padL, last at W-padR.
+    const n = points.length;
+    const step = n > 1 ? innerW / (n - 1) : innerW;
+
+    // Pre-compute x/y for each data point.
+    const pts = points.map((p, i) => {
+      const v = Number(p.count) || 0;
+      return {
+        x: padL + i * step,
+        y: padT + innerH - (v / maxCount) * innerH,
+        v: v,
+        month: p.month || ''
+      };
+    });
+
+    // Gridlines + y-axis ticks at 0 / 50% / 100%
+    const ticks = [0, maxCount / 2, maxCount];
+    let gridHtml = '';
+    ticks.forEach(t => {
+      const y = padT + innerH - (t / maxCount) * innerH;
+      gridHtml += '<line class="chart-grid" x1="' + padL + '" y1="' + y.toFixed(1) +
+                  '" x2="' + (W - padR) + '" y2="' + y.toFixed(1) + '"/>';
+      gridHtml += '<text class="chart-axis" x="' + (padL - 6) + '" y="' + (y + 3).toFixed(1) +
+                  '" text-anchor="end">' + fmtTick(t) + '</text>';
+    });
+
+    // Build smooth curve path using Catmull-Rom → cubic Bezier conversion.
+    // Tension 0.5 gives a natural, not-too-wavy spline.
+    const linePath = smoothPath(pts);
+    const baseY = padT + innerH;
+    const areaPath = linePath +
+      ' L ' + pts[pts.length - 1].x.toFixed(1) + ' ' + baseY.toFixed(1) +
+      ' L ' + pts[0].x.toFixed(1) + ' ' + baseY.toFixed(1) + ' Z';
+
+    // Gradient def (red fading to transparent toward baseline)
+    const defsHtml =
+      '<defs><linearGradient id="emberAreaGrad" x1="0" y1="0" x2="0" y2="1">' +
+      '<stop offset="0%"   stop-color="#ff3c1f" stop-opacity="0.55"/>' +
+      '<stop offset="100%" stop-color="#ff3c1f" stop-opacity="0"/>' +
+      '</linearGradient></defs>';
+
+    const areaHtml = '<path class="chart-area" d="' + areaPath + '"/>';
+    const lineHtml = '<path class="chart-line" d="' + linePath + '"/>';
+
+    // Dots at each point (with tooltip)
+    let dotsHtml = '';
+    pts.forEach(p => {
+      dotsHtml += '<circle class="chart-dot" cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) +
+                  '" r="2.5"><title>' + p.month + ': ' + p.v.toLocaleString() + '</title></circle>';
+    });
+
+    // X-axis labels (every other month, first + last always shown)
+    let labelsHtml = '';
+    pts.forEach((p, i) => {
+      const showLabel = (i % 2 === 0) || i === pts.length - 1;
+      if (showLabel) {
+        const short = (p.month || '').slice(2); // "YY-MM"
+        labelsHtml += '<text class="chart-axis" x="' + p.x.toFixed(1) + '" y="' +
+                      (H - 4).toFixed(1) + '" text-anchor="middle">' + short + '</text>';
+      }
+    });
+
+    svg.innerHTML = defsHtml + gridHtml + areaHtml + lineHtml + dotsHtml + labelsHtml;
+
+    // Summary stats — FIRMS confidence-weighted counts can be non-integer,
+    // so round before display to avoid odd trailing decimals like "137,513.278".
+    const total = points.reduce((s, p) => s + (Number(p.count) || 0), 0);
+    let peak = points[0];
+    points.forEach(p => { if ((p.count || 0) > (peak.count || 0)) peak = p; });
+    document.getElementById('totalFires').textContent =
+      Math.round(total).toLocaleString();
+    const peakMonthEl = document.getElementById('peakMonth');
+    const peakCountEl = document.getElementById('peakCount');
+    if (peak && peak.count > 0) {
+      peakMonthEl.textContent = peak.month;
+      peakCountEl.textContent = Math.round(peak.count).toLocaleString();
+    } else {
+      peakMonthEl.textContent = 'none';
+      peakCountEl.textContent = '—';
+    }
+  }
+
+  // Re-render chart on window resize so it stays crisp
+  let _resizeTimer = null;
+  let _lastPoints = null;
+  window.addEventListener('resize', () => {
+    if (!_lastPoints) return;
+    clearTimeout(_resizeTimer);
+    _resizeTimer = setTimeout(() => renderFirmsChart(_lastPoints), 120);
+  });
+
+  // ── Help-chip popover positioning ─────────────────────────────────
+  //   `position: fixed` alone is NOT enough: `.panel-left` has
+  //   `backdrop-filter: blur(...)` which makes it a containing block for
+  //   fixed-position descendants, so anything inside gets clipped by its
+  //   `overflow: hidden`. Fix: relocate each `.help-pop` to <body> at
+  //   startup so it lives outside any such ancestor.
+  document.querySelectorAll('.help-chip').forEach(chip => {
+    const pop = chip.querySelector('.help-pop');
+    if (!pop) return;
+    document.body.appendChild(pop);   // escape the panel containing block
+
+    const place = () => {
+      const r = chip.getBoundingClientRect();
+      const pw = pop.offsetWidth  || 260;
+      const ph = pop.offsetHeight || 180;
+      // Prefer right of the chip; fall back to left if not enough room.
+      let left = r.right + 10;
+      if (left + pw > window.innerWidth - 8) left = r.left - pw - 10;
+      // Vertically align: start a bit above the chip so content reads
+      // top-to-bottom; keep within viewport.
+      let top = r.top - 6;
+      if (top + ph > window.innerHeight - 8) top = window.innerHeight - ph - 8;
+      if (top < 8) top = 8;
+      pop.style.left = left + 'px';
+      pop.style.top  = top  + 'px';
+    };
+    const show = () => { place(); pop.classList.add('show'); };
+    const hide = () => pop.classList.remove('show');
+    chip.addEventListener('mouseenter', show);
+    chip.addEventListener('mouseleave', hide);
+    chip.addEventListener('focus',      show);
+    chip.addEventListener('blur',       hide);
+    // Keep it open if the pointer moves onto the popover itself.
+    pop.addEventListener('mouseenter', () => pop.classList.add('show'));
+    pop.addEventListener('mouseleave', hide);
+    window.addEventListener('resize', () => {
+      if (pop.classList.contains('show')) place();
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════
+  //  GUIDED TOUR — spotlight-on-each-part onboarding
+  //  Triggered automatically on first visit (localStorage flag) and
+  //  re-launchable via the "?" button in the top bar.
+  // ══════════════════════════════════════════════════════════════════════
+  const TOUR_STEPS = [
+    {
+      target: null,
+      title:  'Welcome to EMBER',
+      body:   'EMBER maps wildfire risk from satellite data. This quick tour will walk you through the workflow — you can skip anytime.',
+      placement: 'center'
+    },
+    {
+      target: '[data-tour="analysis-window"]',
+      title:  '1 · Analysis Window',
+      body:   'Pick the date range you want to analyse. The risk index is computed from satellite data inside this window.',
+      placement: 'right'
+    },
+    {
+      target: '[data-tour="factor-weights"]',
+      title:  '2 · Factor Weights',
+      body:   'Six risk factors combine into the Wildfire Risk Index. Drag the sliders or pick a preset. Hover the ⓘ chip to see what each abbreviation means.',
+      placement: 'right'
+    },
+    {
+      target: '[data-tour="run"]',
+      title:  '3 · Draw an AOI, then run',
+      body:   'Use Rectangle or Polygon to draw your area of interest on the map. Once it\'s valid, Run Analysis wakes up.',
+      placement: 'right'
+    },
+    {
+      target: '[data-tour="layers"]',
+      title:  '4 · Map Layers',
+      body:   'After a run, toggle the risk surfaces and adjust their opacity. The AOI outline auto-hides when results land — re-check it anytime.',
+      placement: 'right'
+    },
+    {
+      target: '.panel-main',
+      title:  '5 · The Map',
+      body:   'Your AOI is drawn here, and the risk raster is painted on top. Scroll to zoom; drag to pan. Click any pixel (after a run) to inspect it.',
+      placement: 'bottom-left'
+    },
+    {
+      target: '[data-tour="summary"]',
+      title:  '6 · AOI Summary & Risk Breakdown',
+      body:   'Top-line numbers for your AOI: area, analysis scale, mean WRI, high-risk area, plus the % split across Low / Medium / High.',
+      placement: 'left'
+    },
+    {
+      target: '[data-tour="contribution"]',
+      title:  '7 · Factor Contribution',
+      body:   'Which factor drove the risk most in your AOI? The donut ranks the six factors by their weighted contribution.',
+      placement: 'left'
+    },
+    {
+      target: '[data-tour="inspector"]',
+      title:  '8 · Pixel Inspector',
+      body:   'Click any pixel on the map after running. You\'ll see its WRI score and a bar for every factor value at that exact point.',
+      placement: 'left'
+    },
+    {
+      target: '[data-tour="fire-activity"]',
+      title:  '9 · Fire Activity',
+      body:   'FIRMS active-fire detections in your AOI over the window: total count, peak month, and the time span.',
+      placement: 'left'
+    },
+    {
+      target: '.panel-bottom',
+      title:  '10 · 12-Month FIRMS Chart',
+      body:   'Monthly fire-detection count for the past year inside your AOI. The shape hints at seasonality.',
+      placement: 'top'
+    },
+    {
+      target: null,
+      title:  'You\'re ready',
+      body:   'That\'s the whole workflow. You can re-launch this tour any time from the "?" button in the top bar. Have fun mapping fire risk!',
+      placement: 'center'
+    }
+  ];
+
+  const TOUR_STORAGE_KEY = 'ember.tour.seen.v1';
+  let _tourIdx = 0;
+  let _tourActive = false;
+
+  function startTour() {
+    _tourIdx = 0;
+    _tourActive = true;
+    // Mark as seen immediately so a mid-tour refresh won't re-trigger it.
+    try { localStorage.setItem(TOUR_STORAGE_KEY, '1'); } catch (_) {}
+    document.getElementById('tourRoot').classList.add('active');
+    showTourStep();
+  }
+
+  function endTour(markSeen) {
+    _tourActive = false;
+    document.getElementById('tourRoot').classList.remove('active');
+    if (markSeen) {
+      try { localStorage.setItem(TOUR_STORAGE_KEY, '1'); } catch (_) {}
+    }
+  }
+
+  function showTourStep() {
+    const step  = TOUR_STEPS[_tourIdx];
+    const spot  = document.getElementById('tourSpotlight');
+    const tip   = document.getElementById('tourTooltip');
+    const title = document.getElementById('tourTitle');
+    const body  = document.getElementById('tourBody');
+    const count = document.getElementById('tourCount');
+    const prev  = document.getElementById('tourPrev');
+    const next  = document.getElementById('tourNext');
+
+    title.textContent = step.title;
+    body.textContent  = step.body;
+    count.textContent = (_tourIdx + 1) + ' / ' + TOUR_STEPS.length;
+    prev.disabled = (_tourIdx === 0);
+    next.textContent = (_tourIdx === TOUR_STEPS.length - 1) ? 'Finish' : 'Next →';
+
+    // Target & spotlight placement
+    const target = step.target ? document.querySelector(step.target) : null;
+    if (!target || step.placement === 'center') {
+      // Center modal — no spotlight
+      spot.style.display = 'none';
+      tip.classList.add('tour-center');
+      tip.style.left = '50%';
+      tip.style.top  = '50%';
+      tip.style.transform = 'translate(-50%, -50%)';
+    } else {
+      const r = target.getBoundingClientRect();
+      const pad = 6;
+      spot.style.display = 'block';
+      spot.style.left   = (r.left   - pad) + 'px';
+      spot.style.top    = (r.top    - pad) + 'px';
+      spot.style.width  = (r.width  + pad * 2) + 'px';
+      spot.style.height = (r.height + pad * 2) + 'px';
+
+      tip.classList.remove('tour-center');
+      tip.style.transform = 'none';
+
+      // Placement calculations
+      const tipW = 340;
+      const gap  = 14;
+      let left, top;
+      const place = step.placement || 'right';
+      if (place === 'right') {
+        left = r.right + gap;
+        top  = r.top;
+      } else if (place === 'left') {
+        left = r.left - tipW - gap;
+        top  = r.top;
+      } else if (place === 'top') {
+        left = r.left + r.width / 2 - tipW / 2;
+        top  = r.top - gap - 180;
+      } else if (place === 'bottom-left') {
+        left = r.left + 20;
+        top  = r.bottom - 180 - gap;
+      } else {
+        // bottom
+        left = r.left + r.width / 2 - tipW / 2;
+        top  = r.bottom + gap;
+      }
+      // Clamp to viewport
+      left = Math.max(12, Math.min(left, window.innerWidth  - tipW - 12));
+      top  = Math.max(12, Math.min(top,  window.innerHeight - 200));
+      tip.style.left = left + 'px';
+      tip.style.top  = top  + 'px';
+
+      // Scroll target into view inside its scroll container (usually none,
+      // but safe if we ever add scroll).
+      if (target.scrollIntoView) {
+        // Only scroll if fully off-screen
+        if (r.bottom < 0 || r.top > window.innerHeight) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }
+    }
+  }
+
+  window.addEventListener('resize', () => {
+    if (_tourActive) showTourStep();
+  });
+
+  // This script is at the end of <body>, so DOMContentLoaded may have
+  // already fired by the time we get here. Handle both paths.
+  function _initTour() {
+    const prev = document.getElementById('tourPrev');
+    const next = document.getElementById('tourNext');
+    const skip = document.getElementById('tourSkip');
+    const openBtn = document.getElementById('tourOpen');
+    if (prev) prev.addEventListener('click', () => {
+      if (_tourIdx > 0) { _tourIdx--; showTourStep(); }
+    });
+    if (next) next.addEventListener('click', () => {
+      if (_tourIdx < TOUR_STEPS.length - 1) { _tourIdx++; showTourStep(); }
+      else endTour(true);
+    });
+    if (skip) skip.addEventListener('click', () => endTour(true));
+    if (openBtn) openBtn.addEventListener('click', () => startTour());
+
+    // Allow Esc to skip the tour from anywhere.
+    document.addEventListener('keydown', (e) => {
+      if (!_tourActive) return;
+      if (e.key === 'Escape')    { endTour(true); }
+      else if (e.key === 'ArrowRight') {
+        if (_tourIdx < TOUR_STEPS.length - 1) { _tourIdx++; showTourStep(); }
+        else endTour(true);
+      }
+      else if (e.key === 'ArrowLeft' && _tourIdx > 0) {
+        _tourIdx--; showTourStep();
+      }
+    });
+
+    // Tour runs every time the site loads — give the layout a tick to
+    // settle so getBoundingClientRect returns accurate positions.
+    setTimeout(startTour, 500);
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _initTour);
+  } else {
+    _initTour();
+  }
+
+  // ── Initial status ─────────────────────────────────────────────────
+  setStatus('loading', 'Connecting to Earth Engine…');
+
 </script>
 
 </body>
