@@ -177,12 +177,12 @@ Where:
 
 | Team Member | Role | Responsibilities |
 |---|---|---|
-| [Name 1] | **Preprocessing** | Data import, cloud masking (`01–02`) |
-| [Name 2] | **Preprocessing + Analysis** | Anomaly calculation, normalisation (`03–04`) |
-| [Name 3] | **Analysis** | WRI calculation, classification (`05–06`) |
-| [Name 4] | **Analysis + Visualisation** | Zonal statistics, charts (`07, 10`) |
-| [Name 5] | **Visualisation** | Inspector panel (`11`) |
-| [Name 6] | **Visualisation + Docs** | Map layers, UI, HTML page, documentation (`08–09`) |
+| ChuHao Xu | **Preprocessing** | Data import, cloud masking (`01–02`) |
+| FangZheng Zhou | **Preprocessing + Analysis** | Anomaly calculation, normalisation (`03–04`) |
+| ZheXiang Zhou | **Analysis** | WRI calculation, classification (`05–06`) |
+| ZiHan Zhang | **Analysis + Visualisation** | Zonal statistics, charts (`07`) |
+| JiaHui Li | **Visualisation** | Inspector panel (`11`) |
+| Arthur Zhang | **Visualisation + Docs** | Map layers, UI, HTML page, documentation (`08–10`) |
 
 See [`CONTRIBUTIONS.md`](CONTRIBUTIONS.md) for detailed task lists, milestones, and GitHub commit conventions.
 
@@ -191,7 +191,7 @@ See [`CONTRIBUTIONS.md`](CONTRIBUTIONS.md) for detailed task lists, milestones, 
 ## How to Use
 
 ### Option A — Access the Published App
-1. Open the live application: `[to be added upon deployment]`
+1. Open the live application: `https://arthurzhang69.github.io/EMBER/`
 2. No login required for viewing
 3. Use the control panel on the left to select a time window, draw your area of interest, adjust factor weights, and click **Run Analysis**
 4. Click any point on the map to inspect individual factor values
